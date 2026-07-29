@@ -121,6 +121,7 @@ export const useReviewStore = defineStore('review', () => {
   // ---- 核心：applyEvent 归约 ----
   function applyEvent(event: PipelineEvent): void {
     const { type, data, timestamp } = event
+    console.log('[Store] applyEvent:', type, 'ts:', timestamp?.substring(11, 19))
 
     switch (type) {
       case 'review.started': {

@@ -48,19 +48,24 @@ export function connectSSE(
   const es = new EventSource(url)
   let hasReceivedMessage = false
 
+  es.onopen = () => {
+    console.log('[SSE] 连接已建立:', url)
+  }
+
   // 监听默认 message 事件（兼容所有 SSE 事件类型）
   es.onmessage = (e: MessageEvent) => {
     try {
       const data: PipelineEvent = JSON.parse(e.data)
       hasReceivedMessage = true
+      console.log('[SSE] 收到事件:', data.type, 'seq:', data.sequence)
       onEvent(data)
-    } catch {
-      // 忽略解析错误
+    } catch (err) {
+      console.error('[SSE] 解析事件失败:', err, 'raw:', e.data?.substring(0, 200))
     }
   }
 
   es.onerror = (e) => {
-    // SSE 在流正常结束和连接失败时都会触发 onerror
+    console.log('[SSE] onerror, readyState:', es.readyState, 'hasMsg:', hasReceivedMessage)
     if (es.readyState === EventSource.CLOSED) {
       if (hasReceivedMessage) {
         // 已收到过数据后关闭 → 正常结束
@@ -96,22 +101,28 @@ export function replayEvents(
   onComplete?: () => void
 ): EventSource {
   const url = `${BASE_URL}/replays/${encodeURIComponent(runId)}/events?speed=${speed}`
-  const es = new EventSource(url)
-  let hasReceivedMessage = false
+  const esR = new EventSource(url)
+  let hasReceivedMessageR = false
 
-  es.onmessage = (e: MessageEvent) => {
+  esR.onopen = () => {
+    console.log('[SSE Replay] 连接已建立:', url)
+  }
+
+  esR.onmessage = (e: MessageEvent) => {
     try {
       const data: PipelineEvent = JSON.parse(e.data)
-      hasReceivedMessage = true
+      hasReceivedMessageR = true
+      console.log('[SSE Replay] 收到事件:', data.type, 'seq:', data.sequence)
       onEvent(data)
-    } catch {
-      // 忽略解析错误
+    } catch (err) {
+      console.error('[SSE Replay] 解析失败:', err, 'raw:', e.data?.substring(0, 200))
     }
   }
 
-  es.onerror = (e) => {
-    if (es.readyState === EventSource.CLOSED) {
-      if (hasReceivedMessage) {
+  esR.onerror = (e) => {
+    console.log('[SSE Replay] onerror, readyState:', esR.readyState, 'hasMsg:', hasReceivedMessageR)
+    if (esR.readyState === EventSource.CLOSED) {
+      if (hasReceivedMessageR) {
         onComplete?.()
       } else {
         onError?.(e)
@@ -119,5 +130,5 @@ export function replayEvents(
     }
   }
 
-  return es
+  return esR
 }

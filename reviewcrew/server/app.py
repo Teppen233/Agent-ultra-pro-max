@@ -159,7 +159,6 @@ async def stream_events(run_id: str, request: Request):
             for event in new_events:
                 last_seq = event.sequence
                 yield {
-                    "event": event.type,
                     "data": event.model_dump_json(),
                 }
 
@@ -221,7 +220,6 @@ async def replay_run_events(run_id: str, speed: float = 1.0):
     async def replay_generator() -> AsyncIterator[dict]:
         async for event in replay_events(events, speed):
             yield {
-                "event": event.type,
                 "data": event.model_dump_json(),
             }
             await asyncio.sleep(0.05 / speed)  # 最小间隔
