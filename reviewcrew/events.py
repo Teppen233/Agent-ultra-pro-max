@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections import defaultdict
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -57,16 +58,32 @@ class EventStore:
         self._lock = Lock()
 
     def create_run(self) -> str:
-        """创建运行目录并返回不可预测的运行标识。"""
+        """原子创建预留运行目录，等待后台 Orchestrator claim。"""
 
         run_id = f"run-{datetime.now(UTC):%Y%m%d-%H%M%S}-{uuid4().hex[:8]}"
-        self._run_dir(run_id).mkdir(parents=True, exist_ok=False)
+        run_dir = self._run_dir(run_id)
+        run_dir.mkdir(parents=True, exist_ok=False)
+        (run_dir / ".reserved").write_text("reserved\n", encoding="utf-8")
         return run_id
+
+    def claim_run(self, run_id: str) -> None:
+        """原子认领一个干净的预留运行；重复或脏目录以中文拒绝。"""
+
+        with self._lock:
+            self._claim_run_unlocked(run_id)
 
     def emit(self, run_id: str, event_type: EventType, data: dict[str, Any]) -> PipelineEvent:
         """持久化事件并通知当前订阅者。"""
 
         with self._lock:
+            run_dir = self._run_dir(run_id)
+            if (run_dir / ".reserved").exists():
+                self._claim_run_unlocked(run_id)
+            if not (run_dir / ".claimed").is_file():
+                raise RuntimeError("运行未预留或尚未被认领，无法写入事件")
+            if run_id not in self._sequences:
+                existing = self.read(run_id)
+                self._sequences[run_id] = max((event.sequence for event in existing), default=0)
             self._sequences[run_id] += 1
             event = PipelineEvent(
                 id=f"evt-{uuid4().hex}",
@@ -115,3 +132,17 @@ class EventStore:
             raise ValueError("运行标识包含非法路径字符")
         return self.root / run_id
 
+    def _claim_run_unlocked(self, run_id: str) -> None:
+        run_dir = self._run_dir(run_id)
+        reserved = run_dir / ".reserved"
+        claimed = run_dir / ".claimed"
+        if claimed.exists():
+            raise RuntimeError("运行已被认领或已经启动")
+        if not run_dir.is_dir() or not reserved.is_file():
+            raise RuntimeError("运行目录未经过预留，拒绝启动审查")
+        if any(path.name != ".reserved" for path in run_dir.iterdir()):
+            raise RuntimeError("预留运行目录已包含数据，拒绝启动审查")
+        try:
+            os.replace(reserved, claimed)
+        except OSError as error:
+            raise RuntimeError("运行已被其他审查任务认领") from error

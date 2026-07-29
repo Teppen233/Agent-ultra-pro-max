@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from reviewcrew.config import Config
+from reviewcrew.events import EventStore
 from reviewcrew.pipeline.orchestrator import Orchestrator
 from reviewcrew.report import persist_report
 from reviewcrew.schemas import (
@@ -500,6 +501,62 @@ async def test_unknown_exception_text_is_not_persisted_in_warning(tmp_path: Path
     persisted = (tmp_path / "runs" / result.run_id / "result.json").read_text(encoding="utf-8")
     assert "sensitive-output" not in persisted
     assert "ValueError" in persisted
+
+
+@pytest.mark.asyncio
+async def test_review_claims_pre_reserved_run_once_and_rejects_duplicate(tmp_path: Path) -> None:
+    """Task10 预留 run_id 可被一次后台审查 claim，重复调用不得污染原运行。"""
+
+    store = EventStore(tmp_path / "runs")
+    run_id = store.create_run()
+    orchestrator = Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        event_store=store,
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+    )
+
+    result = await orchestrator.review(
+        ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"),
+        run_id=run_id,
+    )
+    with pytest.raises(RuntimeError, match="运行.*已"):
+        await orchestrator.review(
+            ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"),
+            run_id=run_id,
+        )
+
+    assert result.run_id == run_id
+    assert [event.sequence for event in store.read(run_id)] == list(range(1, len(store.read(run_id)) + 1))
+
+
+@pytest.mark.asyncio
+async def test_review_can_delegate_terminal_event_to_server_wrapper(tmp_path: Path) -> None:
+    """服务端包装层负责终态时，Orchestrator 不得提前发送 review 终态。"""
+
+    store = EventStore(tmp_path / "runs")
+    run_id = store.create_run()
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        event_store=store,
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+    ).review(
+        ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"),
+        run_id=run_id,
+        emit_terminal_event=False,
+    )
+
+    assert result.status == "completed"
+    assert not any(event.type in {"review.completed", "review.failed"} for event in store.read(run_id))
 
 
 @pytest.mark.asyncio

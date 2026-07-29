@@ -203,14 +203,14 @@ class Orchestrator:
         request: ReviewRequest,
         *,
         run_id: str | None = None,
+        emit_terminal_event: bool = True,
     ) -> ReviewResult:
         """执行一次审查，并在任何超时路径上返回已持久化的 ReviewResult。"""
 
         if run_id is None:
             run_id = self._events.create_run()
-        else:
-            # 服务端会先预留运行目录，以便 POST 在后台审查完成前返回稳定 ID。
-            self._events.read(run_id)
+        # 服务端可先预留目录并返回稳定 ID；无论来源如何都必须原子 claim 一次。
+        self._events.claim_run(run_id)
         started_at = datetime.now(UTC)
         mailbox = Mailbox(self.config.runs_dir, run_id)
         blackboard = EvidenceBlackboard(run_id)
@@ -243,7 +243,8 @@ class Orchestrator:
             self._events.emit(run_id, "report.generated", {"status": result.status})
 
         final_type = "review.failed" if result.status == "failed" else "review.completed"
-        self._events.emit(run_id, final_type, {"status": result.status})
+        if emit_terminal_event:
+            self._events.emit(run_id, final_type, {"status": result.status})
         return result
 
     def _finalize_report(self, state: _RunState) -> tuple[ReviewResult, bool]:

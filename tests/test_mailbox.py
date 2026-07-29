@@ -124,3 +124,47 @@ async def test_publisher_persists_redacted_candidate_but_delivers_full_payload(t
     assert "HTTP 响应头缺少 CSP" in persisted
     for forbidden in ("reasoning_summary", "sensitive-chain", "完整 Prompt", "sensitive-response", "思维链"):
         assert forbidden not in persisted
+
+
+@pytest.mark.asyncio
+async def test_publisher_redacts_deep_sensitive_key_tokens_without_touching_business_values(tmp_path) -> None:
+    """嵌套 Prompt/响应/推理键必须删除，普通路径和值必须保留。"""
+
+    mailbox = Mailbox(tmp_path, "run-deep-redaction")
+    blackboard = EvidenceBlackboard("run-deep-redaction")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    await publisher.publish(
+        sender="agent",
+        recipient="verifier",
+        kind="candidate_finding",
+        key="nested",
+        payload={
+            "file": "src/prompt_builder.py",
+            "description": "HTTP 响应未校验",
+            "nested": {
+                "system_prompt": "secret-system",
+                "developer_prompt_v2": "secret-developer",
+                "user_prompt": "secret-user",
+                "response": "secret-response",
+                "raw_model_response": "secret-raw",
+                "model_output": "secret-output",
+                "reasoning_trace": "secret-reasoning",
+                "safe": [{"status_response_code": 502}],
+            },
+        },
+    )
+
+    persisted = (tmp_path / "run-deep-redaction" / "mailbox.jsonl").read_text(encoding="utf-8")
+    assert "src/prompt_builder.py" in persisted
+    assert "HTTP 响应未校验" in persisted
+    assert "status_response_code" in persisted
+    for secret in (
+        "secret-system",
+        "secret-developer",
+        "secret-user",
+        "secret-response",
+        "secret-raw",
+        "secret-output",
+        "secret-reasoning",
+    ):
+        assert secret not in persisted
