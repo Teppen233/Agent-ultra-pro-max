@@ -8,7 +8,7 @@
 
 **Architecture:** 双层架构——离线知识层（tree-sitter 符号索引/call graph/架构摘要/历史 bug 模式）+ 在线五阶段管道（预处理 → 上下文组装 → 2 专家并行审查 → 对抗验证 → 报告）。静态信号（Semgrep/linter/依赖审计）作为证据注入，Agent 裁决真伪。
 
-**Tech Stack:** Python 3.12 + asyncio + httpx + tree-sitter + SQLite + FastAPI(SSE) · Vue 3 + Vite + TS + Pinia + Tailwind + Naive UI + @vue-flow/core + @git-diff-view/vue + shiki + echarts · pytest + Vitest
+**Tech Stack:** Python 3.12 + asyncio + **pydantic-ai** + httpx + tree-sitter + SQLite + FastAPI(SSE) · Vue 3 + Vite + TS + Pinia + Tailwind + Naive UI + @vue-flow/core + @git-diff-view/vue + shiki + echarts · pytest + Vitest
 
 ## Global Constraints
 
@@ -16,7 +16,7 @@
 - LLM 仅走 GLM API，temperature=0.2，结构化输出走 JSON mode
 - 在线 Agent 只有 3 种：DefectAgent / IntentAgent / VerifierAgent；Orchestrator、Context Builder、报告生成不得实现为 Agent
 - 单 PR 最终输出 ≤ 8 条 findings；confidence < 0.6 一律丢弃
-- 不引入 LangChain/LangGraph；Agent loop 自研（base.py ≤ 300 行）
+- Agent 基座用 Pydantic AI（GLM 经 OpenAI 兼容端点接入）；编排层保持纯 asyncio，不引入 LangGraph/CrewAI 等图编排框架
 - 不使用 CodeQL
 - 所有 LLM 交互（prompt/response/tool calls）落盘 `runs/<run_id>/events.jsonl`（供 replay 与 debug）
 - Python 代码全部带类型注解，pytest 覆盖核心逻辑；每个任务结束 commit 一次
@@ -32,14 +32,14 @@
 - Test: `tests/test_glm.py`, `tests/test_events.py`
 
 **Interfaces:**
-- Provides: `GLMClient.chat(messages: list[Message], tools: list[ToolSpec] | None, json_schema: dict | None) -> LLMResponse`（内置：429/5xx 指数退避重试×3、JSON 解析失败带错误反馈重试×2、每次调用写 events.jsonl）
+- Provides: `build_glm_model() -> pydantic_ai.models.Model`（`OpenAIModel`，base_url 指向 GLM OpenAI 兼容端点；httpx transport 配 429/5xx 指数退避×3；结构化输出校验重试由 pydantic-ai 承担）
 - Provides: `EventLogger.emit(event: PipelineEvent) -> None`；`PipelineEvent` 为 tagged union：`stage|agent|thought|tool|finding|verdict|report`（字段对齐 frontend-design.md §4，这是前后端唯一契约）
 - Provides: `Config.from_env()`（GLM_API_KEY、并发信号量上限、时间预算常量）
 
 **Steps:**
 - [ ] 写 `tests/test_events.py`：PipelineEvent 序列化/反序列化 round-trip；跑测试确认失败
 - [ ] 实现 `events.py`（pydantic tagged union）+ `config.py`；测试转绿
-- [ ] 写 `tests/test_glm.py`：mock httpx，覆盖重试、JSON mode 解析失败反馈重试；跑测试确认失败
+- [ ] 写 `tests/test_glm.py`：mock httpx 覆盖 429/5xx 退避；用 pydantic-ai `TestModel` 验证模型端到端可调；确认失败
 - [ ] 实现 `glm.py`；测试转绿
 - [ ] 用真实 API key 跑一次冒烟脚本 `python -m reviewcrew.llm.glm --smoke`
 - [ ] Commit
@@ -145,14 +145,15 @@
 - Test: `tests/test_agent_loop.py`
 
 **Interfaces:**
-- Provides: `class BaseAgent: async run(pack: ContextPack, budget: Budget) -> list[Finding]`——循环 ≤12 轮；每轮 GLM 输出либо tool_call либо findings JSON；**每 4 轮强制输出中间 findings 快照**；超时/超轮次取最后快照（agent-topology §7）
-- Provides: `Toolbox`：`read_file(path, start, end)` / `find_references(symbol)` / `get_callers(func)` / `get_callees(func)` / `git_blame(path, line_range)` / `run_semgrep_rule(rule_id, path)`——全部只读，路径白名单限制在 repo 内
+- Provides: `class ReviewAgent: async run(pack: ContextPack, budget: Budget) -> list[Finding]`——封装 pydantic-ai `Agent`：`output_type=AgentFindings`（校验失败自动 `ModelRetry`）、`UsageLimits(request_limit=12)` 落实 12 轮上限、`event_stream_handler` 将模型文本/工具调用透传为 `thought`/`tool` 事件
+- Provides: 工具经 `@agent.tool` 注册：`read_file(path, start, end)` / `find_references(symbol)` / `get_callers(func)` / `get_callees(func)` / `git_blame(path, line_range)` / `run_semgrep_rule(rule_id, path)`——全部只读，路径白名单限制在 repo 内
+- 快照机制：注册 `submit_snapshot(findings)` 工具，system prompt 要求每 4 轮调用一次；超时/超轮次取最后快照（agent-topology §7）
 - `Finding` schema 逐字段对齐 design-doc §4-③（category/severity/confidence/file/line/title/reasoning/trigger_path/suggestion）
 - 每轮 emit `thought` 与 `tool` 事件到 EventLogger
 
 **Steps:**
-- [ ] 写测试：mock GLM 驱动 3 轮循环（tool→tool→findings）、快照兜底、非法 JSON 重试；确认失败
-- [ ] 实现 base.py + toolbox.py；测试转绿
+- [ ] 写测试：用 `FunctionModel` 脚本化驱动（tool→tool→结构化输出）、UsageLimits 截断取快照兜底、输出校验失败自动重试；确认失败
+- [ ] 实现 base.py（封装层 ≤150 行）+ toolbox.py；测试转绿
 - [ ] Commit
 
 ### Task 8: DefectAgent + IntentAgent

@@ -29,7 +29,8 @@
 
 - ❌ CodeQL（建库时间不可控，与 10min 时限冲突；其覆盖面由 Semgrep + LLM 数据流推理替代）
 - ❌ 全仓库扫描
-- ❌ 重型 Agent 框架（LangChain / LangGraph）—— 自研轻量 orchestrator，可控、可调试
+- ❌ 重型编排框架（LangChain / LangGraph / CrewAI）—— 编排层保持纯 asyncio 固定 DAG
+- ✅ Agent 内层采用 **Pydantic AI**（轻量、类型安全）—— 工具注册、结构化输出、校验重试交给框架，不自研 loop
 
 ---
 
@@ -126,7 +127,7 @@ ContextPack {
 | **MemoryAgent** | 内存/资源问题 | 泄漏（连接/句柄/goroutine）、use-after-free、双重释放、无界增长（缓存/队列）、大对象拷贝 |
 | **ArchAgent** | 架构问题 + 静态缺陷 | 循环依赖、层次穿透、接口破坏性变更、依赖缺失/版本冲突、公共 API 兼容性 |
 
-**Agent 循环**（自研，~200 行）：
+**Agent 循环**（Pydantic AI 基座，封装层 ~100 行）：
 ```
 loop (max 8 turns):
   LLM(system_prompt + context_pack + tool_results) 
@@ -194,7 +195,8 @@ loop (max 8 turns):
 
 ## 6. 模型与 Agent 工程
 
-- **模型**：GLM API（对齐 GLM 4.5+/5.x 能力），温度 0.2，JSON mode 输出
+- **模型**：GLM API（对齐 GLM 4.5+/5.x 能力），温度 0.2，经 OpenAI 兼容端点接入
+- **Agent 基座**：Pydantic AI —— `@agent.tool` 注册工具、`output_type` 结构化输出（直接绑 Finding schema）、校验失败自动 `ModelRetry`、`UsageLimits` 控轮次；自带 `TestModel/FunctionModel`，Agent 逻辑可离线 TDD
 - **上下文策略**：子 Agent 独立上下文（避免注意力稀释），Orchestrator 只收结构化 JSON 汇总
 - **并发**：`asyncio` + 信号量控制 API 并发数
 - **可靠性**：JSON 解析失败自动重试（带错误反馈）；单 Agent 失败不阻塞整体，降级输出
