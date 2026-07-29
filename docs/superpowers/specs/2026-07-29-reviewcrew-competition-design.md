@@ -535,7 +535,192 @@ reviewcrew/
 - 保存成功命中的 PR 或提交链接。
 - 验证至少一个完整 PR 在 600 秒内结束。
 
-### 15.3 12:00 冻结标准
+### 15.3 Greptile Benchmark 测评方法
+
+测评基准以 [Greptile AI Code Review Benchmarks](https://www.greptile.com/benchmarks) 公布的方法和 Case Library 为准。该页面在 2025 年评测了 5 个代码审查工具，数据集包含 5 个不同语言的开源仓库、每个仓库 10 个真实缺陷，共 50 个案例。
+
+基准仓库为：
+
+| 语言 | 仓库 | 上游地址 |
+|---|---|---|
+| Python | Sentry | `https://github.com/getsentry/sentry` |
+| TypeScript | Cal.com | `https://github.com/calcom/cal.com` |
+| Go | Grafana | `https://github.com/grafana/grafana` |
+| Java | Keycloak | `https://github.com/keycloak/keycloak` |
+| Ruby | Discourse | `https://github.com/discourse/discourse` |
+
+Greptile 的原始方法具有以下约束：
+
+1. 从每个仓库选择 10 个真实漏洞修复 PR，并追溯找到引入漏洞的提交。
+2. 排除规模极大的修改和单文件修改，使案例更接近真实团队审查。
+3. 为每个案例构造干净的测试 PR，使 PR 重新引入原始缺陷。
+4. 被测工具可以访问完整仓库、PR diff 和基准分支。
+5. 只有工具在行级结果中明确指出错误代码并解释实际影响，才算命中。
+6. 只在摘要中提到风险、不定位错误行、只给风格建议或只报告无关问题，均不算命中目标漏洞。
+7. 原榜单的 catch rate 只统计目标漏洞是否被发现；误报、风格建议和无关评论不改变该命中率。
+
+#### 15.3.1 Fork 与测试 PR 准备
+
+四名开发者共同使用同一套评测仓库和案例定义，不允许每份赛马实现自行改变目标答案。
+
+1. 将上述 5 个上游仓库分别 Fork 到团队 GitHub 组织或统一账号。
+2. 为每个 Benchmark 案例记录原始修复 PR、漏洞描述、严重度、漏洞引入提交和漏洞修复提交。
+3. 确定 `base_sha`：漏洞引入前的基准提交。
+4. 确定 `head_sha`：包含漏洞引入修改、但尚未修复的提交。
+5. 在团队 Fork 中为案例建立独立的 base/head 分支，并创建新的测试 PR。
+6. 核对测试 PR diff 确实重新引入目标漏洞，且不存在修复后的代码。
+7. 保存测试 PR URL，作为系统输入和最终交付链接。
+
+如果时间不足以在截止前重建全部 50 个 PR，必须优先保证：
+
+- 5 个仓库均已 Fork。
+- 每个仓库至少有一个经过核对、能够稳定运行的测试 PR。
+- 所有声称“成功扫描”的链接都指向真实运行过的测试 PR。
+- 未运行、重建失败或结果不确定的案例明确标记，不计入分母或命中数。
+
+#### 15.3.2 数据集文件
+
+评测案例统一保存在 `benchmark/dataset.yaml`：
+
+```yaml
+- id: sentry-01
+  language: python
+  upstream_repo: https://github.com/getsentry/sentry
+  fork_repo: https://github.com/<team>/sentry-reviewcrew
+  source_fix_pr: https://github.com/getsentry/sentry/pull/<number>
+  test_pr: https://github.com/<team>/sentry-reviewcrew/pull/<number>
+  base_sha: <漏洞引入前提交>
+  head_sha: <包含漏洞的提交>
+  introducing_commit: <漏洞引入提交>
+  fixing_commit: <漏洞修复提交>
+  title: <案例标题>
+  bug_description: <已知目标漏洞描述>
+  severity: high
+  category: logic
+  bug_locations:
+    - path: src/example.py
+      line_start: 120
+      line_end: 126
+  status: ready
+```
+
+`status` 使用以下枚举：
+
+- `ready`：PR 和目标答案已核对，可以运行。
+- `needs_review`：已经收集，但目标行或提交仍需人工核对。
+- `unavailable`：仓库、提交或 PR 无法重建。
+
+自动评测只能运行 `ready` 案例。
+
+#### 15.3.3 执行命令
+
+计划提供以下统一入口：
+
+```powershell
+# 快速评测：每个仓库优先抽取一个 ready 案例
+python -m benchmark.runner --mode quick
+
+# 指定单个案例，用于 Subagent 调优
+python -m benchmark.runner --case sentry-01
+
+# 运行全部已准备好的案例
+python -m benchmark.runner --mode full
+
+# 从已有运行记录重新生成报告，不重复调用模型
+python -m benchmark.report --latest
+```
+
+每次运行的原始结果保存到：
+
+```text
+benchmark/results/<timestamp>/
+├── cases.jsonl
+├── summary.json
+├── summary.md
+└── runs/
+```
+
+每个案例必须记录模型、Prompt 版本、Git 提交、开始时间、总耗时、候选 Finding、Verifier 结果、最终 Finding 和错误信息，保证调优结果可追溯。
+
+#### 15.3.4 自动命中判定
+
+`benchmark.judge` 采用三层判定：
+
+1. **文件匹配**：Finding 的 `file` 必须与任一目标文件一致。
+2. **位置匹配**：Finding 行区间必须与目标区间重叠；为兼容重建 PR 的轻微行号变化，可配置最多正负 10 行容差，但报告必须标出是否使用容差。
+3. **语义匹配**：Finding 必须明确描述同一个错误机制和实际影响。仅文件、行号相同但描述的是另一个问题，不算命中。
+
+语义判定优先采用人工核对。批量自动化时可以使用独立 GLM Judge，但 Judge 只能读取目标漏洞描述和最终 Finding，不得读取被测 Agent 的隐藏推理。自动 Judge 输出：
+
+```python
+class JudgeResult(BaseModel):
+    case_id: str
+    caught: bool
+    matched_finding_id: str | None
+    location_match: bool
+    semantic_match: bool
+    used_line_tolerance: bool
+    reason: str
+    needs_human_review: bool
+```
+
+以下结果不得判为命中：
+
+- 只在报告摘要中泛泛提到风险。
+- 没有定位到目标错误代码或附近修改行。
+- 只提出测试不足、重构或风格建议。
+- 描述了同一文件中的其他缺陷。
+- Finding 被 Verifier 最终拒绝。
+- 无法解释缺陷会产生什么实际影响。
+
+#### 15.3.5 指标
+
+与 Greptile 榜单直接对应的主指标：
+
+```text
+目标漏洞命中率 = 成功命中的 ready 案例数 / 实际完成运行的 ready 案例数
+```
+
+同时记录以下工程指标：
+
+- 每个仓库的命中数和运行数。
+- 每种语言和缺陷类别的命中率。
+- Critical、High、Medium、Low 分级命中率。
+- 单 PR 平均耗时、P50 和最大耗时。
+- 超过 600 秒的案例数。
+- 单 PR 最终 Finding 数量。
+- 非目标 Finding 数量，作为内部误报观察值。
+- Verifier 接受数、拒绝数和可能误杀数。
+- 失败、降级和无法判定案例数。
+
+原 Greptile 榜单不会因误报降低 catch rate，但 ReviewCrew 的内部报告仍必须统计非目标 Finding，避免通过大量泛化输出刷命中。
+
+#### 15.3.6 成功链接与交付报告
+
+最终 `docs/评测报告.md` 至少包含：
+
+| 字段 | 说明 |
+|---|---|
+| 仓库与语言 | 例如 Sentry / Python |
+| 测试 PR | 团队 Fork 中重新构造的 PR 链接 |
+| 上游修复 PR | 用于核对真实漏洞来源 |
+| 漏洞描述 | Benchmark 公布的目标问题 |
+| 严重度与类别 | Benchmark 严重度和系统分类 |
+| 是否命中 | 是、否或需要人工复核 |
+| 命中 Finding | 文件、行号、标题和实际影响 |
+| 审查耗时 | 秒 |
+| 运行记录 | 对应 JSON、Markdown 或前端 Replay 标识 |
+
+“成功扫描目标漏洞的 PR 提交链接”必须可点击访问，并能证明：
+
+1. PR diff 中包含目标漏洞。
+2. ReviewCrew 的最终结果定位到错误行。
+3. ReviewCrew 解释了该错误造成的实际影响。
+4. 结果未被 Verifier 拒绝。
+
+评测报告必须区分：完整 50 案例结果、截止前已准备案例结果和快速演示子集，禁止将小样本命中率表述成完整 Benchmark 成绩。
+
+### 15.4 12:00 冻结标准
 
 - 后端自动测试通过。
 - 前端生产构建通过。
