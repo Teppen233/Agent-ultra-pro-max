@@ -462,47 +462,47 @@ git commit -m "feat: 构建差异中心上下文与只读工具"
 - Produces: `HookManager.run(name: HookName, context: HookContext) -> None`
 - Produces: `SkillRegistry.select(role: str, risks: list[str], budget: Budget) -> list[SkillDefinition]`
 
-- [ ] **Step 1: 写模型构建测试**
+- [x] **Step 1: 写模型构建测试**
 
 验证模型名和 base URL 来自 Config，API Key 不出现在 `repr` 和日志中。
 
-- [ ] **Step 2: 使用 Pydantic AI TestModel 写结构化输出测试**
+- [x] **Step 2: 使用 Pydantic AI TestModel 写结构化输出测试**
 
 测试工具调用事件、合法 Finding、校验失败重试和请求数限制。
 
-- [ ] **Step 3: 写 Hook 与 Skill Registry 测试**
+- [x] **Step 3: 写 Hook 与 Skill Registry 测试**
 
 验证角色权限、Skill YAML 元数据、Prompt 组合顺序、版本哈希稳定性、Hook 异常不阻塞主管道，以及安全 Hook 可以拒绝越界路径工具调用。
 
-- [ ] **Step 4: 写 TeamLead 计划测试**
+- [x] **Step 4: 写 TeamLead 计划测试**
 
 使用 TestModel 返回 ReviewPlan，断言安全相关 diff 同时路由 Defect 和 Intent，大 PR 产生语义分片，预算不足时禁止扩展新分片。TeamLead 不得输出 Finding。
 
-- [ ] **Step 5: 运行测试并确认失败**
+- [x] **Step 5: 运行测试并确认失败**
 
 Run: `pytest tests/test_glm.py tests/test_agent_runtime.py tests/test_hooks.py tests/test_skill_registry.py -v`
 
-- [ ] **Step 6: 实现 GLM 模型、AgentRuntime、Hooks 和 SkillRegistry**
+- [x] **Step 6: 实现 GLM 模型、AgentRuntime、Hooks 和 SkillRegistry**
 
 通过 OpenAI 兼容 Provider 接入；temperature 使用模型支持的最低稳定值。公开日志使用中文，禁止记录完整 Prompt 和响应原文。
 
 Prompt 组装顺序固定为共享规则、角色 Prompt、动态 Skill、ReviewPlan/Context/Mailbox、剩余预算和输出 Schema。运行记录保存 Prompt 文件哈希、Skill 名称和版本。
 
-- [ ] **Step 7: 实现 TeamLeadAgent**
+- [x] **Step 7: 实现 TeamLeadAgent**
 
 TeamLead 只输出 ReviewPlan、分片、角色路由和预算，不直接生成 Finding。实际任务创建、Mailbox 和超时仍由 Orchestrator 控制。
 
-- [ ] **Step 8: 实现显式 smoke 命令**
+- [x] **Step 8: 实现显式 smoke 命令**
 
 Run: `python -m reviewcrew.llm.glm --smoke`
 
 无 `GLM_API_KEY` 时输出中文说明并以非零状态退出；有 Key 时要求模型返回固定 Pydantic 对象。
 
-- [ ] **Step 9: 运行离线测试并确认通过**
+- [x] **Step 9: 运行离线测试并确认通过**
 
 Run: `pytest tests/test_glm.py tests/test_agent_runtime.py tests/test_hooks.py tests/test_skill_registry.py -v`
 
-- [ ] **Step 10: 提交**
+- [x] **Step 10: 提交**
 
 ```powershell
 git add reviewcrew/llm reviewcrew/agents/base.py reviewcrew/agents/team_lead.py reviewcrew/agents/prompts/shared-system.md reviewcrew/agents/prompts/team-lead.md reviewcrew/hooks.py reviewcrew/skills tests/test_glm.py tests/test_agent_runtime.py tests/test_hooks.py tests/test_skill_registry.py
