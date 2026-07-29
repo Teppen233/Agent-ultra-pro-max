@@ -100,65 +100,142 @@
 
 ### ② 上下文组装（目标 <60s）
 为每个变更符号构建 **Context Pack**：
+
+```python
+from pydantic import BaseModel, Field
+
+class Hunk(BaseModel):
+    """单个 diff hunk"""
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    lines: list[str]  # 带前缀 ' '/'+'/'-' 的行
+
+class FileDiff(BaseModel):
+    """单文件 diff"""
+    path: str
+    change_type: Literal["add", "modify", "delete", "rename"]
+    old_path: str | None = None  # rename 时旧路径
+    hunks: list[Hunk]
+
+class Signal(BaseModel):
+    """静态信号（Semgrep/linter/deps）"""
+    provider: str  # "semgrep" / "ruff" / "osv"
+    rule_id: str
+    file: str
+    line: int
+    message: str
+    severity: Literal["error", "warning", "info"]
+
+class ContextPack(BaseModel):
+    """单个审查上下文包，喂给一个 Agent 实例"""
+    pack_id: str
+    
+    # 变更本体
+    diff_hunks: list[FileDiff]
+    
+    # 代码上下文
+    enclosing_code: dict[str, str]  # {file: 完整函数/类代码}
+    callers: dict[str, list[str]]   # {func: [调用者代码片段]}
+    callees: dict[str, list[str]]   # {func: [被调代码片段]}
+    
+    # 仓库知识
+    arch_summary: str = Field(max_length=2048, description="相关模块架构摘要片段")
+    bug_patterns: str = Field(max_length=1024, description="该仓库历史缺陷模式")
+    
+    # 意图信号（与 diff 分离呈现，让 Agent 找偏差）
+    intent: str = Field(description="PR title/description + issue + 测试变更摘要")
+    
+    # 静态信号
+    static_signals: list[Signal]
+    
+    # token 预算：tiktoken 估算 ≤32K
 ```
-ContextPack {
-  diff_hunks:        变更本体（带精确行号）
-  enclosing_code:    变更所在完整函数/类
-  callers/callees:   Call Graph 上下游 1-2 跳的代码
-  arch_summary:      相关模块的架构摘要片段
-  bug_patterns:      该仓库历史缺陷模式
-  intent:            PR title/description + 关联 issue + 测试文件变更
-  static_signals:    Semgrep/linter 命中结果（file:line 对齐到 diff）
-}
-```
+
 **关键点**：
 - `intent` 与 `diff` 分离呈现 —— 让 Agent 找"作者想做的"与"实际做的"之间的偏差，这是业务逻辑缺陷的主要来源
 - 测试断言的变更是意图金矿，单独标注
-- 上下文预算控制：每个 Agent 输入 ≤ 32K tokens，超出按"离 diff 距离"裁剪
+- 上下文预算控制：每个 ContextPack 用 tiktoken 估算 ≤ 32K tokens，超出按"离 diff 行距离"由远及近裁剪 callers/callees
 
 ### ③ 专家 Agent 并行审查（目标 <5min）
 
-四个专家 Agent **独立上下文、并行执行**，各自持有差异化的系统提示与检查清单：
+> **架构决策**：采用 **2 专家 + 1 Verifier 共 3 个 Agent**（详见 `agent-topology.md`），
+> 用"推理模式"而非"缺陷类型"拆分，避免上下文重叠导致的成本浪费。
 
-| Agent | 覆盖缺陷类型 | 检查清单要点 |
-|---|---|---|
-| **SecurityAgent** | 安全漏洞 | 注入（SQL/命令/路径）、SSRF、反序列化、认证/越权、密钥泄漏、taint 流推理（source→sink 沿 call graph 人工追踪） |
-| **LogicAgent** | 业务逻辑 + 逻辑缺陷 | 意图-实现偏差、边界条件、off-by-one、条件反转、状态机漏转移、并发竞态、错误处理遗漏、变更前后语义对比 |
-| **MemoryAgent** | 内存/资源问题 | 泄漏（连接/句柄/goroutine）、use-after-free、双重释放、无界增长（缓存/队列）、大对象拷贝 |
-| **ArchAgent** | 架构问题 + 静态缺陷 | 循环依赖、层次穿透、接口破坏性变更、依赖缺失/版本冲突、公共 API 兼容性 |
+两个专家 Agent **独立上下文、并行执行**：
 
-**Agent 循环**（Pydantic AI 基座，封装层 ~100 行）：
-```
-loop (max 8 turns):
+| Agent | 覆盖缺陷类型 | 推理模式 | 检查清单要点 |
+|---|---|---|---|
+| **DefectAgent** | 安全漏洞 / 内存问题 / 静态缺陷 | 模式匹配型 | 分节 checklist（安全 → 内存 → 静态）：注入、taint 流、资源生命周期、裁决静态信号真伪 |
+| **IntentAgent** | 业务逻辑 / 逻辑缺陷 / 架构问题 | 语义理解型 | 三步固定流程：总结意图 → 总结实际变更 → diff 两者找偏差 → 过边界/状态机/依赖方向清单 |
+
+**Agent 循环**（Pydantic AI 基座，封装层 ≤150 行）：
+```python
+# 每个 Agent 最多 12 轮（从原 4×8 调整为 2×12，更深而非更宽）
+loop (max 12 turns):
   LLM(system_prompt + context_pack + tool_results) 
-  → 要么调用工具（read_file / find_references / get_callers / git_blame / run_semgrep_rule）
-  → 要么输出结构化 findings JSON
+  → 调用工具（read_file / find_references / get_callers / git_blame / run_semgrep_rule）
+  OR 调用 submit_snapshot(findings)  # 每 4 轮强制快照
+  OR 输出最终结构化 findings
 ```
 
-**Findings Schema**：
-```json
-{
-  "category": "logic|security|memory|architecture|static",
-  "severity": "critical|high|medium|low",
-  "confidence": 0.0-1.0,
-  "file": "path", "line_start": n, "line_end": n,
-  "title": "一句话", 
-  "reasoning": "推理过程",
-  "trigger_path": "触发条件/复现路径",
-  "suggestion": "修复建议"
-}
+**Finding Schema（完整定义）**：
+```python
+from typing import Literal
+from pydantic import BaseModel, Field
+
+class Finding(BaseModel):
+    """单条缺陷发现，由专家 Agent 输出，Verifier 打分"""
+    category: Literal["logic", "security", "memory", "architecture", "static"]
+    severity: Literal["critical", "high", "medium", "low"]
+    confidence: float = Field(ge=0.0, le=1.0, description="初始由专家给出，Verifier 重打分")
+    
+    file: str = Field(description="仓库相对路径")
+    line_start: int = Field(ge=1)
+    line_end: int = Field(ge=1)
+    
+    title: str = Field(max_length=120, description="一句话缺陷摘要")
+    reasoning: str = Field(description="完整推理过程，含证据引用")
+    trigger_path: str = Field(description="触发条件/复现步骤/调用链")
+    suggestion: str = Field(description="具体修复建议，最好附代码片段")
+    
+    # Verifier 填充字段
+    verdict: Literal["keep", "reject"] | None = None
+    verdict_reason: str | None = None
 ```
 
 ### ④ 对抗验证 Verifier（目标 <2min）——压误报的命门
 
-- 汇总去重所有候选 findings（同文件同行区间 + 语义相似合并）
-- 每个 finding 交给 VerifierAgent **反向质疑**：
+**去重合并阶段**：
+```python
+def dedupe(findings: list[Finding]) -> list[Finding]:
+    """
+    1. 同文件行区间重叠（±3 行容差）→ 合并取高 confidence
+    2. 跨文件语义近似 → embedding 余弦 >0.85 合并
+    """
+```
+
+**对抗验证阶段**：
+每个 finding 交给 VerifierAgent **反向质疑四问**：
   1. 触发路径是否真实可达？（可调工具重读代码验证）
   2. 是否被别处的校验/防御代码兜住了？
   3. 是否是测试代码/示例代码的误判？
-  4. 置信度重打分，`confidence < 0.6` 直接丢弃
-- 输出上限控制：单 PR 最多报 **8 条**，按 severity × confidence 排序取头部
-  （benchmark 每个 PR 只埋 1 个目标漏洞，宁精勿滥）
+  4. severity 是否虚高？
+
+VerifierAgent 输出：
+```python
+class Verdict(BaseModel):
+    finding_id: str
+    verdict: Literal["keep", "reject"]
+    reason: str
+    confidence_adjusted: float  # 重打分后的置信度
+```
+
+**门限控制**：
+- `confidence_adjusted < 0.6` 直接丢弃
+- 按 `severity_weight × confidence_adjusted` 排序
+- 截断取前 **8 条**（benchmark 每个 PR 只埋 1 个目标漏洞，宁精勿滥）
 
 ### ⑤ 报告生成（目标 <30s）
 - Markdown 报告 + GitHub PR Review Comment 格式（行级锚定）
@@ -170,12 +247,14 @@ loop (max 8 turns):
 |---|---|---|
 | 预处理 | 10s | 纯本地计算 |
 | 上下文组装 | 60s | 索引查询 + Semgrep 并行跑 |
-| 专家审查 | 5min | 4 Agent 并行，单 Agent 8 轮内 |
+| 专家审查 | 5min | **2 Agent 并行（DefectAgent/IntentAgent），单 Agent 12 轮内** |
 | 对抗验证 | 2min | findings 并行验证 |
 | 报告 | 30s | 单次 LLM 调用 |
 | **合计** | **~8.5min** | 预留 1.5min buffer |
 
-超时保护：全局 watchdog，任一 Agent 超预算强制收敛输出当前结果。
+超时保护：全局 watchdog，任一 Agent 超预算强制收敛输出当前快照。
+
+**架构调整说明**：从原 4 Agent × 8 轮调整为 2 Agent × 12 轮，token 成本降低 ~40%，推理深度增加。
 
 ---
 
@@ -183,11 +262,27 @@ loop (max 8 turns):
 
 抽象为 `SignalProvider` 接口，即插即用：
 
-| Provider | 作用 | 耗时 |
-|---|---|---|
-| **Semgrep** | 安全规则 + 通用 bug 模式，diff 文件定向扫描 | ~10-30s |
-| 语言 Linter | go vet / eslint / clippy / ruff 等按语言启用 | ~10s |
-| 依赖审计 | lockfile diff → 已知 CVE 检查（osv.dev API） | ~5s |
+```python
+from abc import ABC, abstractmethod
+
+class SignalProvider(ABC):
+    """静态信号提供者基类"""
+    @abstractmethod
+    async def scan(self, repo_path: Path, files: list[str]) -> list[Signal]:
+        """
+        扫描指定文件，返回信号列表
+        - 超时 60s 返回空列表（不抛异常阻塞管道）
+        - 单 provider 失败只记日志
+        """
+```
+
+| Provider | 作用 | 实现 | 耗时 |
+|---|---|---|---|
+| **SemgrepProvider** | 安全规则 + 通用 bug 模式 | `semgrep --config auto --json <files>` | ~10-30s |
+| **LinterProvider** | 语言 linter | go vet / eslint / clippy / ruff 按语言路由 | ~10s |
+| **DepsProvider** | 依赖审计 | lockfile diff → osv.dev batch API | ~5s |
+
+**失败语义**：单 provider 异常/超时 → 返回空列表 + 日志，绝不抛出阻塞管道。
 
 信号结果对齐到 diff 行号后注入 ContextPack —— **Agent 负责裁决信号真伪**，而不是直接透传（这就是比传统工具误报低的原因）。
 
@@ -195,12 +290,97 @@ loop (max 8 turns):
 
 ## 6. 模型与 Agent 工程
 
-- **模型**：GLM API（对齐 GLM 4.5+/5.x 能力），温度 0.2，经 OpenAI 兼容端点接入
-- **Agent 基座**：Pydantic AI —— `@agent.tool` 注册工具、`output_type` 结构化输出（直接绑 Finding schema）、校验失败自动 `ModelRetry`、`UsageLimits` 控轮次；自带 `TestModel/FunctionModel`，Agent 逻辑可离线 TDD
-- **上下文策略**：子 Agent 独立上下文（避免注意力稀释），Orchestrator 只收结构化 JSON 汇总
-- **并发**：`asyncio` + 信号量控制 API 并发数
-- **可靠性**：JSON 解析失败自动重试（带错误反馈）；单 Agent 失败不阻塞整体，降级输出
-- **可观测**：全程结构化日志（每轮 prompt/response/工具调用落盘），便于 debug 与演示回放
+### 6.1 模型配置
+```python
+from pydantic_ai.models import OpenAIModel
+
+def build_glm_model() -> OpenAIModel:
+    """构建 GLM 模型客户端"""
+    return OpenAIModel(
+        model="glm-4-plus",  # 或 glm-5
+        base_url="https://open.bigmodel.cn/api/paas/v4/",  # GLM OpenAI 兼容端点
+        api_key=os.getenv("GLM_API_KEY"),
+        temperature=0.2,
+        http_client=httpx.AsyncClient(
+            timeout=120.0,
+            transport=RetryTransport(retries=3, backoff=2.0)  # 429/5xx 指数退避
+        )
+    )
+```
+
+### 6.2 Agent 基座封装
+```python
+from pydantic_ai import Agent
+from pydantic_ai.settings import ModelSettings, UsageLimits
+
+class ReviewAgent:
+    """专家 Agent 基类，封装 pydantic-ai 循环"""
+    def __init__(self, role: str, system_prompt: str):
+        self.agent = Agent(
+            model=build_glm_model(),
+            output_type=AgentFindings,  # 结构化输出，校验失败自动 ModelRetry
+            system_prompt=system_prompt,
+            settings=ModelSettings(
+                usage_limits=UsageLimits(request_limit=12)  # 12 轮上限
+            )
+        )
+        # 注册工具
+        self._register_tools()
+    
+    async def run(self, pack: ContextPack, budget: Budget) -> list[Finding]:
+        """执行审查循环，每 4 轮调用 submit_snapshot"""
+        # 封装层 ≤150 行，处理：
+        # - 快照机制
+        # - 事件流透传（thought/tool → EventLogger）
+        # - 超时/超轮次兜底
+```
+
+### 6.3 事件流（可观测性 + 前端数据源）
+```python
+from typing import Literal
+from pydantic import BaseModel
+
+class PipelineEvent(BaseModel):
+    """结构化事件，全程落盘 runs/<run_id>/events.jsonl，供前端 SSE 和 replay"""
+    timestamp: float
+    type: Literal["stage", "agent", "thought", "tool", "finding", "verdict", "report"]
+    
+    # type=stage
+    stage: Literal["preprocess", "context", "review", "verify", "report"] | None = None
+    status: Literal["start", "done"] | None = None
+    elapsed: float | None = None
+    
+    # type=agent
+    agent: Literal["defect", "intent", "verifier"] | None = None
+    agent_status: Literal["running", "done"] | None = None
+    
+    # type=thought
+    text: str | None = None
+    
+    # type=tool
+    tool: str | None = None
+    args: dict | None = None
+    result: str | None = None
+    
+    # type=finding
+    finding: Finding | None = None
+    
+    # type=verdict
+    verdict: Verdict | None = None
+    
+    # type=report
+    markdown: str | None = None
+
+class EventLogger:
+    """事件日志器，写 JSONL + 推 SSE"""
+    def emit(self, event: PipelineEvent) -> None:
+        # 落盘 + 推送到前端 SSE 连接
+```
+
+### 6.4 上下文策略与并发
+- **子 Agent 独立上下文**：避免注意力稀释，Orchestrator 只收结构化 JSON 汇总
+- **并发**：`asyncio.gather([defect.run(...), intent.run(...)])` + 信号量控制 API qps
+- **可靠性**：单 Agent 失败不阻塞整体，降级输出（返回部分 findings）
 
 ---
 

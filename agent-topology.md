@@ -33,6 +33,8 @@ Verifier 独立是**不可谈判项**：生成者不能验证自己的输出（�
   - 资源生命周期：申请点 → 所有退出路径是否释放
   - 裁决静态信号真伪（linter 报的不直接透传，先判断）
 - **工具**：read_file / find_references / get_callers / run_semgrep_rule
+- **输入 schema**：`ContextPack`（详见 design-doc.md §4-②）
+- **输出 schema**：`list[Finding]`（详见 design-doc.md §4-③）
 
 ### 2.2 IntentAgent（意图审计官）— 语义理解型
 
@@ -43,6 +45,8 @@ Verifier 独立是**不可谈判项**：生成者不能验证自己的输出（�
   2. 再总结"实际变更语义"（只看 diff，变更前 vs 变更后行为对比）
   3. diff 这两个总结 → 偏差即候选缺陷；再过一遍边界条件/状态机/依赖方向 checklist
 - **工具**：read_file / find_references / get_callers / git_blame
+- **输入 schema**：`ContextPack`（详见 design-doc.md §4-②）
+- **输出 schema**：`list[Finding]`（详见 design-doc.md §4-③）
 
 ### 2.3 VerifierAgent（对抗验证官）
 
@@ -50,6 +54,15 @@ Verifier 独立是**不可谈判项**：生成者不能验证自己的输出（�
 - **质疑四问**：触发路径可达吗？有防御代码兜底吗？是测试/示例代码吗？严重度虚高吗？
 - **门限**：confidence < 0.6 丢弃；单 PR 输出 ≤ 8 条
 - **上下文**：干净上下文（不带专家的推理偏见），可调工具重读代码
+- **输入 schema**：`list[Finding]`（所有专家的候选）
+- **输出 schema**：`list[Verdict]`（详见 design-doc.md §4-④），每条 verdict 包含：
+  ```python
+  class Verdict(BaseModel):
+      finding_id: str  # 对应原 finding
+      verdict: Literal["keep", "reject"]
+      reason: str
+      confidence_adjusted: float  # 重打分
+  ```
 
 ## 3. 少 agent 的补偿机制
 
@@ -64,14 +77,19 @@ Verifier 独立是**不可谈判项**：生成者不能验证自己的输出（�
 
 ## 4. 时间预算（更新）
 
-| 阶段 | 旧预算 | 新预算 | 变化 |
+| 阶段 | 旧预算（4 agent） | 新预算（2 agent） | 变化 |
 |---|---|---|---|
 | 预处理 | 10s | 10s | — |
 | 上下文组装 | 60s | 60s | — |
 | 专家审查 | 5min（4 并行×8 轮） | **5min（2 并行×12 轮）** | 更深而非更宽 |
 | 对抗验证 | 2min | 2min | — |
 | 报告 | 30s | 30s | — |
-| **合计** | ~8.5min | **~8.5min** | 时限不变，token 成本 ↓~40% |
+| **合计** | ~8.5min | **~8.5min** | **时限不变，token 成本 ↓~40%，推理深度↑** |
+
+**12 轮轮次控制**：
+- 每 4 轮强制调用 `submit_snapshot(findings)` 工具，输出中间结果
+- watchdog 超时 OR 达到 12 轮上限 → 取最后快照作为最终输出
+- UsageLimits 由 pydantic-ai 框架自动截断
 
 ## 5. 非 Agent 组件（明确不升格为 agent）
 

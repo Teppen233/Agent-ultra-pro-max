@@ -72,18 +72,52 @@
 后端 FastAPI 推 SSE 事件流，前端一个 store 消费：
 
 ```ts
+// 完整事件类型定义，与后端 design-doc.md §6.3 PipelineEvent 一致
 type PipelineEvent =
-  | { type: 'stage',   stage: 'preprocess'|'context'|'review'|'verify'|'report', status: 'start'|'done', elapsed: number }
-  | { type: 'agent',   agent: 'security'|'logic'|'memory'|'arch'|'verifier', status: 'running'|'done' }
-  | { type: 'thought', agent: string, text: string }                    // 思考流增量
-  | { type: 'tool',    agent: string, tool: string, args: string }      // 工具调用气泡
-  | { type: 'finding', payload: Finding }                               // 右栏落卡
-  | { type: 'verdict', findingId: string, verdict: 'keep'|'reject', reason: string }  // 淘汰动画
-  | { type: 'report',  markdown: string }
+  | { type: 'stage';   stage: 'preprocess'|'context'|'review'|'verify'|'report'; status: 'start'|'done'; elapsed: number; timestamp: number }
+  | { type: 'agent';   agent: 'defect'|'intent'|'verifier'; agent_status: 'running'|'done'; timestamp: number }
+  | { type: 'thought'; agent: string; text: string; timestamp: number }  // 思考流增量
+  | { type: 'tool';    agent: string; tool: string; args: Record<string, any>; result?: string; timestamp: number }  // 工具调用气泡
+  | { type: 'finding'; finding: Finding; timestamp: number }  // 右栏落卡
+  | { type: 'verdict'; verdict: Verdict; timestamp: number }  // 淘汰动画
+  | { type: 'report';  markdown: string; timestamp: number }
+
+// Finding 类型（与后端一致）
+interface Finding {
+  category: 'logic' | 'security' | 'memory' | 'architecture' | 'static';
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  confidence: number;  // 0.0-1.0
+  
+  file: string;
+  line_start: number;
+  line_end: number;
+  
+  title: string;
+  reasoning: string;
+  trigger_path: string;
+  suggestion: string;
+  
+  // Verifier 填充字段
+  verdict?: 'keep' | 'reject';
+  verdict_reason?: string;
+}
+
+// Verdict 类型（与后端一致）
+interface Verdict {
+  finding_id: string;
+  verdict: 'keep' | 'reject';
+  reason: string;
+  confidence_adjusted: number;
+}
 ```
 
+**类型安全策略**：
+- 前端类型从后端 Pydantic schema 自动生成（用 `pydantic-to-typescript` 或手动同步）
+- 勿手写两份，design-doc.md §6.3 是唯一事实源
+- 每次后端 schema 变更必须同步更新前端类型
+
 **⚠️ 录制视频的保命设计 —— Replay 模式**：
-后端本来就全程落盘结构化日志（设计文档 §6），做一个 `GET /replay/{run_id}` 按原始时间戳（可 2x 加速）重放事件流。**录视频不依赖现场调 API**，不会翻车，还能挑一个最精彩的 run 反复录。这个功能优先级和驾驶舱本体一样高。
+后端本来就全程落盘结构化日志（设计文档 §6.3），做一个 `GET /api/replay/{run_id}?speed=2` 按原始时间戳（可加速）重放事件流。**录视频不依赖现场调 API**，不会翻车，还能挑一个最精彩的 run 反复录。这个功能优先级和驾驶舱本体一样高。
 
 ## 5. 视频 3 分钟分镜建议
 
