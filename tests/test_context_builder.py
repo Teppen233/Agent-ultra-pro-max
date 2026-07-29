@@ -21,6 +21,17 @@ index 1111111..2222222 100644
 +    return checked
 """
 
+TYPESCRIPT_DIFF = """diff --git a/packages/auth/session.ts b/packages/auth/session.ts
+index 1111111..2222222 100644
+--- a/packages/auth/session.ts
++++ b/packages/auth/session.ts
+@@ -1 +1,3 @@
+-export const getCalendar = repository.get;
++export async function getCalendar(calendarId: string) {
++  return repository.get(calendarId);
++}
+"""
+
 
 @pytest.mark.asyncio
 async def test_build_context_collects_code_tests_and_docs(tmp_path: Path) -> None:
@@ -72,3 +83,39 @@ async def test_build_context_marks_truncation(tmp_path: Path) -> None:
 
     assert packs[0].truncated is True
 
+
+@pytest.mark.asyncio
+async def test_build_context_collects_bounded_cross_file_symbol_references(tmp_path: Path) -> None:
+    """声明型修改应检索跨文件调用入口，并排除当前修改文件与重复结果。"""
+
+    changed = tmp_path / "packages/auth/session.ts"
+    changed.parent.mkdir(parents=True)
+    changed.write_text(
+        "export async function getCalendar(calendarId: string) {\n"
+        "  return repository.get(calendarId);\n}\n",
+        encoding="utf-8",
+    )
+    caller = tmp_path / "apps/web/api/calendar.ts"
+    caller.parent.mkdir(parents=True)
+    caller.write_text(
+        "export async function handler(calendarId: string) {\n"
+        "  return getCalendar(calendarId);\n}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text("调用 getCalendar 获取日历。\n", encoding="utf-8")
+    pr = PRData(
+        provider="local",
+        repository="calcom-demo",
+        title="调整日历读取",
+        base_sha="base",
+        head_sha="head",
+        files=parse_unified_diff(TYPESCRIPT_DIFF),
+        raw_diff=TYPESCRIPT_DIFF,
+    )
+
+    pack = (await build_context(pr, tmp_path, Config(context_character_budget=20_000)))[0]
+
+    assert pack.related_code
+    assert {item.file for item in pack.related_code} == {"apps/web/api/calendar.ts"}
+    assert any(item.start_line <= 2 <= item.end_line for item in pack.related_code)
+    assert len(pack.related_code) <= 10

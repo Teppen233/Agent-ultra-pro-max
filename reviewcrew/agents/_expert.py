@@ -87,6 +87,8 @@ class ExpertAgent:
         self._handled_handoffs.clear()
         self._handled_evidence.clear()
         publisher = self._publisher or (MessagePublisher(mailbox=mailbox, blackboard=blackboard) if mailbox is not None or blackboard is not None else None)
+        if mailbox is not None:
+            mailbox.register(agent_id)
         latest_snapshot = AgentSnapshot(
             agent_id=agent_id,
             pending_checks=self._checks(),
@@ -399,7 +401,6 @@ class ExpertAgent:
 
         if mailbox is None:
             return
-        mailbox.register(snapshot.agent_id)
         loop = asyncio.get_running_loop()
         if self._collaboration_window_seconds is not None:
             deadline = min(deadline, loop.time() + self._collaboration_window_seconds)

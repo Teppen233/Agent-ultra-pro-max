@@ -145,6 +145,25 @@ class CandidateBarrierPublisher:
         return published
 
 
+class ImmediateVerifierTerminalPublisher:
+    """专家发布初审屏障时同步广播 Verifier 终态，复现注册窗口竞态。"""
+
+    def __init__(self, delegate: MessagePublisher) -> None:
+        self.delegate = delegate
+
+    async def publish(self, **kwargs) -> bool:  # type: ignore[no-untyped-def]
+        published = await self.delegate.publish(**kwargs)
+        if published and kwargs["kind"] == "agent_review_completed":
+            await self.delegate.publish(
+                sender="verifier",
+                recipient="*",
+                kind="agent_completed",
+                key="completed",
+                payload={"agent_id": "verifier", "role": "verifier"},
+            )
+        return published
+
+
 def test_expert_prompts_cover_required_review_dimensions() -> None:
     """两个角色 Prompt 必须显式列出各自不可省略的审查维度。"""
 
@@ -606,6 +625,32 @@ async def test_expert_waits_for_verifier_after_announcing_initial_review_complet
 
     await asyncio.wait_for(task, timeout=0.2)
     assert len(blackboard.by_kind("agent_completed")) == 2
+
+
+@pytest.mark.asyncio
+async def test_expert_cannot_miss_verifier_terminal_during_review_barrier(tmp_path) -> None:
+    """Verifier 在屏障发布期间完成时，专家也必须立即结束而非等满窗口。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    mailbox = Mailbox(tmp_path, "run-review-barrier-race")
+    blackboard = EvidenceBlackboard("run-review-barrier-race")
+    publisher = ImmediateVerifierTerminalPublisher(
+        MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    )
+
+    await asyncio.wait_for(
+        DefectAgent(publisher=publisher, collaboration_window_seconds=1.0).run(
+            make_context(), mailbox=mailbox, blackboard=blackboard
+        ),
+        timeout=0.2,
+    )
+
+    assert blackboard.by_kind("agent_review_completed")
+    assert any(
+        message.payload.get("agent_id") == "verifier"
+        for message in blackboard.by_kind("agent_completed")
+    )
 
 
 @pytest.mark.asyncio
