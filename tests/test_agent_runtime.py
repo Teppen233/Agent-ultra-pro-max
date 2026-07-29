@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.output import PromptedOutput
 
 from reviewcrew.agents.base import AgentRuntime, Budget, PromptSource, ReviewAgentProtocol, VerifierProtocol
 from reviewcrew.config import Config
@@ -14,6 +15,42 @@ from reviewcrew.agents.team_lead import TeamLeadAgent
 from reviewcrew.schemas import Budget as SchemaBudget
 from reviewcrew.schemas import AgentSnapshot, CodeEvidence, ContextPack, Finding, PRData, ReviewPlan, Verdict
 from reviewcrew.skills.registry import SkillRegistry
+
+
+def test_resolve_role_model_builds_configured_model_with_role_override(monkeypatch) -> None:
+    """生产构造器应在有密钥时自动按角色模型创建兼容模型。"""
+
+    from reviewcrew.agents import base
+
+    captured: list[Config] = []
+    sentinel = object()
+    monkeypatch.setattr(base, "build_glm_model", lambda config: captured.append(config) or sentinel)
+
+    resolved = base.resolve_role_model(
+        None,
+        Config(llm_api_key="secret", llm_model="global", defect_model="defect-model"),
+        "defect",
+    )
+
+    assert resolved is sentinel
+    assert captured[0].llm_model == "defect-model"
+    assert "secret" not in repr(captured[0])
+
+
+def test_resolve_role_model_keeps_fake_mode_without_key() -> None:
+    """未配置密钥时保持离线 fallback，不隐式访问网络。"""
+
+    from reviewcrew.agents.base import resolve_role_model
+
+    assert resolve_role_model(None, Config(), "intent") is None
+
+
+def test_runtime_uses_prompted_output_when_configured() -> None:
+    """兼容端点应能切换到提示式 JSON 输出而不改业务代码。"""
+
+    runtime = AgentRuntime(config=Config(llm_output_mode="prompted"))
+
+    assert isinstance(runtime.output_type_for(ReviewPlan), PromptedOutput)
 
 
 def make_context() -> ContextPack:

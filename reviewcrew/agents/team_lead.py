@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic_ai.models import Model
 
-from reviewcrew.agents.base import AgentRuntime, Budget, PromptSource
+from reviewcrew.agents.base import AgentRuntime, Budget, PromptSource, resolve_role_model
 from reviewcrew.config import Config
 from reviewcrew.schemas import ContextPack, PRData, ReviewPlan
 from reviewcrew.skills.registry import SkillRegistry
@@ -22,9 +22,9 @@ class TeamLeadAgent:
         config: Config | None = None,
         runtime: AgentRuntime | None = None,
     ) -> None:
-        self._model = model
         self._skills_root = skills_root or Path(__file__).parent.parent / "skills"
         self._config = config or Config()
+        self._model = resolve_role_model(model, self._config, "team_lead")
         self._runtime = runtime or AgentRuntime(config=self._config)
 
     async def plan(self, pr: PRData, contexts: list[ContextPack], budget: Budget) -> ReviewPlan:

@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic_ai.models import Model
 
-from reviewcrew.agents.base import AgentRuntime, PromptSource
+from reviewcrew.agents.base import AgentRuntime, PromptSource, resolve_role_model
 from reviewcrew.config import Config
 from reviewcrew.schemas import (
     AgentSnapshot,
@@ -52,13 +52,17 @@ class ExpertAgent:
         max_evidence_requests: int = 8,
     ) -> None:
         self.role = role
-        self._model = model
         self._skills_root = skills_root or Path(__file__).parent.parent / "skills"
         self._config = config or Config()
+        self._model = resolve_role_model(model, self._config, role)
         self._runtime = runtime or AgentRuntime(config=self._config)
         self._tools = tuple(tools)
         self._publisher = publisher
-        self._collaboration_window_seconds = collaboration_window_seconds
+        self._collaboration_window_seconds = (
+            collaboration_window_seconds
+            if collaboration_window_seconds is not None
+            else self._config.collaboration_window_seconds
+        )
         if max_evidence_requests <= 0:
             raise ValueError("补证请求总量上限必须大于零")
         self._max_evidence_requests = max_evidence_requests

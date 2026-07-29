@@ -9,10 +9,21 @@ import pytest
 from pydantic_ai.models.test import TestModel
 
 from reviewcrew.agents.base import AgentRuntime
+from reviewcrew.config import Config
 from reviewcrew.schemas import AgentSnapshot, Budget, ContextPack, DiffHunk, TeamMessage
 from reviewcrew.team.blackboard import EvidenceBlackboard
 from reviewcrew.team.mailbox import Mailbox
 from reviewcrew.team.publisher import MessagePublisher
+
+
+def test_expert_uses_configured_collaboration_window_by_default() -> None:
+    """未显式注入窗口时，专家采用配置上限而不是等待完整阶段预算。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    agent = DefectAgent(config=Config(collaboration_window_seconds=7.5))
+
+    assert agent._collaboration_window_seconds == 7.5
 
 
 def make_context(*, sample_rate: bool = False) -> ContextPack:

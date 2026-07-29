@@ -11,7 +11,7 @@ from typing import Any, Sequence
 
 from pydantic_ai.models import Model
 
-from reviewcrew.agents.base import AgentRuntime, PromptSource
+from reviewcrew.agents.base import AgentRuntime, PromptSource, resolve_role_model
 from reviewcrew.config import Config
 from reviewcrew.schemas import (
     Budget,
@@ -48,9 +48,9 @@ class VerifierAgent:
         confidence_threshold: float = 0.6,
         max_findings: int = 8,
     ) -> None:
-        self._model = model
         self._skills_root = skills_root or Path(__file__).parent.parent / "skills"
         self._config = config or Config()
+        self._model = resolve_role_model(model, self._config, "verifier")
         self._runtime = runtime or AgentRuntime(config=self._config)
         self._tools = tuple(tools)
         self._publisher = publisher

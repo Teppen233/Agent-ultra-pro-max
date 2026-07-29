@@ -14,14 +14,27 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import AgentStreamEvent, FunctionToolCallEvent
 from pydantic_ai.models import Model
+from pydantic_ai.output import PromptedOutput
 from pydantic_ai.usage import RunUsage, UsageLimits
 
-from reviewcrew.config import Config
+from reviewcrew.config import AgentRole, Config
 from reviewcrew.hooks import HookContext, HookManager
+from reviewcrew.llm.glm import build_glm_model
 from reviewcrew.schemas import AgentSnapshot, Budget, ContextPack, Finding, Verdict
 
 if TYPE_CHECKING:
     from reviewcrew.skills.registry import SkillDefinition
+
+
+def resolve_role_model(model: Model | None, config: Config, role: AgentRole) -> Model | None:
+    """按角色配置解析模型；无密钥时保持离线模式。"""
+
+    if model is not None:
+        return model
+    if config.llm_api_key is None:
+        return None
+    role_config = config.model_copy(update={"llm_model": config.model_for(role)})
+    return build_glm_model(role_config)
 
 
 @runtime_checkable
@@ -124,6 +137,13 @@ class AgentRuntime:
         )
         return prompt
 
+    def output_type_for(self, output_type: type[Any]) -> type[Any] | PromptedOutput[Any]:
+        """按兼容端点能力选择工具式或提示式结构化输出。"""
+
+        if self.config.llm_output_mode == "prompted":
+            return PromptedOutput(output_type)
+        return output_type
+
     async def run_structured(
         self,
         model: Model,
@@ -152,7 +172,12 @@ class AgentRuntime:
         agent_run_started = False
         try:
             usage = RunUsage()
-            agent = Agent(model, output_type=output_type, retries=self.config.llm_max_retries, tools=tools)
+            agent = Agent(
+                model,
+                output_type=self.output_type_for(output_type),
+                retries=self.config.llm_max_retries,
+                tools=tools,
+            )
             if self.hook_manager is not None:
                 await self.hook_manager.run("before_agent", HookContext(role=role))
             agent_run_started = True
