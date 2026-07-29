@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,7 +33,7 @@ class Config(BaseSettings):
     llm_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     llm_timeout_seconds: float = Field(default=120.0, gt=0)
     llm_max_retries: int = Field(default=2, ge=0, le=10)
-    llm_output_mode: Literal["tool", "prompted"] = "tool"
+    llm_output_mode: Literal["tool", "prompted"] = "prompted"
 
     team_lead_model: str | None = None
     defect_model: str | None = None
@@ -44,7 +44,7 @@ class Config(BaseSettings):
     pr_load_timeout_seconds: int = Field(default=30, gt=0)
     context_timeout_seconds: int = Field(default=90, gt=0)
     review_timeout_seconds: int = Field(default=300, gt=0)
-    collaboration_window_seconds: float = Field(default=30.0, gt=0)
+    collaboration_window_seconds: float = Field(default=125.0, gt=0)
     verifier_timeout_seconds: int = Field(default=120, gt=0)
     report_timeout_seconds: int = Field(default=30, gt=0)
     max_concurrency: int = Field(default=4, gt=0, le=32)
@@ -52,6 +52,14 @@ class Config(BaseSettings):
 
     runs_dir: Path = Path("runs")
     github_token: SecretStr | None = None
+
+    @model_validator(mode="after")
+    def validate_collaboration_window(self) -> "Config":
+        """保证专家仍在线等待 Verifier 首次裁决后可能发出的补证请求。"""
+
+        if self.collaboration_window_seconds < self.llm_timeout_seconds:
+            raise ValueError("专家协作窗口不得短于单次模型超时")
+        return self
 
     @classmethod
     def from_env(cls) -> "Config":

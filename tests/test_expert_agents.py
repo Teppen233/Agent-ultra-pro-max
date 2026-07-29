@@ -10,7 +10,7 @@ from pydantic_ai.models.test import TestModel
 
 from reviewcrew.agents.base import AgentRuntime
 from reviewcrew.config import Config
-from reviewcrew.schemas import AgentSnapshot, Budget, ContextPack, DiffHunk, TeamMessage
+from reviewcrew.schemas import AgentSnapshot, Budget, CodeEvidence, ContextPack, DiffHunk, TeamMessage
 from reviewcrew.team.blackboard import EvidenceBlackboard
 from reviewcrew.team.mailbox import Mailbox
 from reviewcrew.team.publisher import MessagePublisher
@@ -21,7 +21,7 @@ def test_expert_uses_configured_collaboration_window_by_default() -> None:
 
     from reviewcrew.agents.defect import DefectAgent
 
-    agent = DefectAgent(config=Config(collaboration_window_seconds=7.5))
+    agent = DefectAgent(config=Config(llm_timeout_seconds=5, collaboration_window_seconds=7.5))
 
     assert agent._collaboration_window_seconds == 7.5
 
@@ -177,6 +177,44 @@ async def test_defect_agent_publishes_sql_injection_candidate_from_fake_model(tm
     candidates = blackboard.by_kind("candidate_finding")
     assert candidates[0].payload["finding"]["id"] == "finding-security"
     assert blackboard.by_kind("agent_completed")
+
+
+@pytest.mark.asyncio
+async def test_expert_publishes_bounded_typed_context_for_verifier(tmp_path) -> None:
+    """专家候选携带去重且有上限的类型化上下文，供 Verifier 判断可达性。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    evidence = CodeEvidence(
+        source="enclosing_code",
+        file="src/service.py",
+        start_line=1,
+        end_line=20,
+        description="公开入口直接调用修改函数。",
+        content="def public_api(user_id): return load_user(user_id)",
+    )
+    context = make_context().model_copy(
+        update={
+            "enclosing_code": [evidence, evidence],
+            "related_code": [
+                evidence.model_copy(update={"source": "related_code", "start_line": index, "end_line": index})
+                for index in range(21, 35)
+            ],
+        }
+    )
+    mailbox = Mailbox(tmp_path, "run-verification-context")
+    blackboard = EvidenceBlackboard("run-verification-context")
+
+    await DefectAgent(
+        model=make_model(category="security", line=10, title="SQL 拼接可注入"),
+        collaboration_window_seconds=0.01,
+    ).run(context, mailbox=mailbox, blackboard=blackboard, budget=Budget(seconds=60))
+
+    payload = blackboard.by_kind("candidate_finding")[0].payload
+    verification_context = payload["verification_context"]
+    assert len(verification_context) == 12
+    assert verification_context[0]["source"] == "enclosing_code"
+    assert len({(item["source"], item["file"], item["start_line"], item["end_line"]) for item in verification_context}) == 12
 
 
 @pytest.mark.asyncio

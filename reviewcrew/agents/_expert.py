@@ -15,6 +15,7 @@ from reviewcrew.config import Config
 from reviewcrew.schemas import (
     AgentSnapshot,
     Budget,
+    CodeEvidence,
     ContextPack,
     EvidenceResponse,
     Finding,
@@ -201,9 +202,40 @@ class ExpertAgent:
                 kind="candidate_finding",
                 recipient="verifier",
                 key=f"candidate:{finding.id}",
-                payload={"finding": finding.model_dump(mode="json"), "context_id": context.id},
+                payload={
+                    "finding": finding.model_dump(mode="json"),
+                    "context_id": context.id,
+                    "verification_context": [
+                        item.model_dump(mode="json")
+                        for item in self._verification_context(context)
+                    ],
+                },
                 correlation_id=finding.id,
             )
+
+    @staticmethod
+    def _verification_context(context: ContextPack) -> list[CodeEvidence]:
+        """按稳定优先级提供最多十二条上下文证据，并消除重复片段。"""
+
+        selected: list[CodeEvidence] = []
+        seen: set[tuple[Any, ...]] = set()
+        for item in [*context.enclosing_code, *context.related_code, *context.related_tests]:
+            key = (
+                item.source,
+                item.file,
+                item.start_line,
+                item.end_line,
+                item.description,
+                item.content,
+                item.content_hash,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(item)
+            if len(selected) == 12:
+                break
+        return selected
 
     async def _respond_to_requests(
         self,

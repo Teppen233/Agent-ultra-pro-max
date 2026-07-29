@@ -45,10 +45,26 @@ def test_resolve_role_model_keeps_fake_mode_without_key() -> None:
     assert resolve_role_model(None, Config(), "intent") is None
 
 
+def test_resolve_role_model_keeps_fake_mode_with_blank_key() -> None:
+    """复制示例配置但未填写密钥时不得尝试创建生产模型。"""
+
+    from reviewcrew.agents.base import resolve_role_model
+
+    assert resolve_role_model(None, Config(llm_api_key="   "), "defect") is None
+
+
 def test_runtime_uses_prompted_output_when_configured() -> None:
     """兼容端点应能切换到提示式 JSON 输出而不改业务代码。"""
 
     runtime = AgentRuntime(config=Config(llm_output_mode="prompted"))
+
+    assert isinstance(runtime.output_type_for(ReviewPlan), PromptedOutput)
+
+
+def test_runtime_defaults_to_prompted_output_for_compatible_endpoint() -> None:
+    """OpenAI 兼容端点默认采用已验证可用的提示式结构化输出。"""
+
+    runtime = AgentRuntime(config=Config())
 
     assert isinstance(runtime.output_type_for(ReviewPlan), PromptedOutput)
 

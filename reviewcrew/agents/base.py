@@ -14,6 +14,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import AgentStreamEvent, FunctionToolCallEvent
 from pydantic_ai.models import Model
+from pydantic_ai.models.test import TestModel
 from pydantic_ai.output import PromptedOutput
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -31,7 +32,7 @@ def resolve_role_model(model: Model | None, config: Config, role: AgentRole) -> 
 
     if model is not None:
         return model
-    if config.llm_api_key is None:
+    if config.llm_api_key is None or not config.llm_api_key.get_secret_value().strip():
         return None
     role_config = config.model_copy(update={"llm_model": config.model_for(role)})
     return build_glm_model(role_config)
@@ -137,10 +138,15 @@ class AgentRuntime:
         )
         return prompt
 
-    def output_type_for(self, output_type: type[Any]) -> type[Any] | PromptedOutput[Any]:
-        """按兼容端点能力选择工具式或提示式结构化输出。"""
+    def output_type_for(
+        self,
+        output_type: type[Any],
+        model: Model | None = None,
+    ) -> type[Any] | PromptedOutput[Any]:
+        """按兼容端点能力选择结构化输出；测试模型保留原生工具协议。"""
 
-        if self.config.llm_output_mode == "prompted":
+        is_test_model = isinstance(model, TestModel)
+        if self.config.llm_output_mode == "prompted" and not is_test_model:
             return PromptedOutput(output_type)
         return output_type
 
@@ -174,7 +180,7 @@ class AgentRuntime:
             usage = RunUsage()
             agent = Agent(
                 model,
-                output_type=self.output_type_for(output_type),
+                output_type=self.output_type_for(output_type, model),
                 retries=self.config.llm_max_retries,
                 tools=tools,
             )

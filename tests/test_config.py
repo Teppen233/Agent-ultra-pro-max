@@ -20,11 +20,19 @@ def test_config_exposes_bounded_expert_collaboration_window(
 ) -> None:
     """专家发布候选后只等待可配置的短协作窗口，不能耗尽整个审查阶段。"""
 
+    monkeypatch.setenv("REVIEWCREW_LLM_TIMEOUT_SECONDS", "10")
     monkeypatch.setenv("REVIEWCREW_COLLABORATION_WINDOW_SECONDS", "12.5")
 
     config = Config.from_env()
 
     assert config.collaboration_window_seconds == 12.5
+
+
+def test_config_rejects_collaboration_window_shorter_than_model_timeout() -> None:
+    """协作窗口必须覆盖首次 Verifier 模型调用，避免补证请求到达时专家已退出。"""
+
+    with pytest.raises(ValidationError, match="协作窗口"):
+        Config(llm_timeout_seconds=20, collaboration_window_seconds=10)
 
 
 def test_role_model_falls_back_to_global_model(monkeypatch: pytest.MonkeyPatch) -> None:
