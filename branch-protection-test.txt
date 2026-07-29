@@ -1,2 +1,0 @@
-branch protection test 2026-07-29
-This file is created to test branch protection rules on develop-1.1 branch.
