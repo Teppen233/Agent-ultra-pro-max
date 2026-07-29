@@ -42,7 +42,7 @@ const playDemo = async (): Promise<void> => {
   <div class="start-page page-width">
     <section class="hero">
       <div class="hero-copy">
-        <span class="hero-badge"><i /> MULTI-AGENT CODE INTELLIGENCE</span>
+        <span class="hero-badge"><i /> 多智能体代码审查</span>
         <h1>让每一行改动，<br><em>都经得起独立验证。</em></h1>
         <p>两位专家并行寻找可证伪的缺陷假设，Verifier 负责反证与裁决。只发布有修改行定位、有触发条件、有实际影响的问题。</p>
         <div class="hero-proof">
@@ -50,7 +50,7 @@ const playDemo = async (): Promise<void> => {
         </div>
       </div>
       <div class="launch-card panel">
-        <div class="launch-head"><div><span class="eyebrow">START A REVIEW</span><h2>发起代码审查</h2></div><span class="secure-chip">只读访问</span></div>
+        <div class="launch-head"><div><span class="eyebrow">发起审查</span><h2>创建代码审查运行</h2></div><span class="secure-chip">只读访问</span></div>
         <div class="mode-tabs">
           <button :class="{ active: mode === 'github' }" @click="mode = 'github'">GitHub PR</button>
           <button :class="{ active: mode === 'local' }" @click="mode = 'local'">本地仓库</button>
@@ -65,11 +65,11 @@ const playDemo = async (): Promise<void> => {
             <div class="input-shell"><span>⌁</span><input id="repo-path" v-model="repoPath" required></div>
             <div class="two-fields"><div><label for="base-ref">基准引用</label><input id="base-ref" v-model="baseRef" required></div><div><label for="head-ref">目标引用</label><input id="head-ref" v-model="headRef" required></div></div>
           </template>
-          <p v-if="error" class="form-error">{{ error }}</p>
+          <p v-if="error" class="form-error" role="alert" aria-live="assertive">{{ error }}</p>
           <button class="primary-button" type="submit" :disabled="loading"><span>{{ loading ? '正在创建运行…' : '启动真实审查' }}</span><b>→</b></button>
         </form>
         <div class="demo-divider"><span>或使用稳定演示模式</span></div>
-        <button class="demo-button" @click="playDemo"><span class="play-icon">▶</span><span><strong>播放最佳离线 Replay</strong><small>无需后端、模型或网络 · 约 6 秒</small></span><b>DEMO</b></button>
+        <button class="demo-button" @click="playDemo"><span class="play-icon">▶</span><span><strong>播放最佳离线回放</strong><small>无需后端、模型或网络 · 约 6 秒</small></span><b>演示</b></button>
       </div>
     </section>
     <section class="capability-strip">

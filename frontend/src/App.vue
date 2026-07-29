@@ -11,7 +11,7 @@ const route = useRoute()
         <span class="brand-mark"><i /><i /><i /></span>
         <span>
           <strong>ReviewCrew</strong>
-          <small>AI CODE REVIEW TEAM</small>
+          <small>智能代码审查团队</small>
         </span>
       </RouterLink>
       <nav aria-label="主导航">

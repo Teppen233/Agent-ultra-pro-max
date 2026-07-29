@@ -116,6 +116,16 @@ export interface ReviewResult {
   elapsed_seconds: number
 }
 
+export interface ReviewPendingResponse {
+  kind: 'pending'
+  run_id: string
+  status: string
+}
+
+export type ReviewResponse =
+  | ReviewPendingResponse
+  | { kind: 'result'; result: ReviewResult }
+
 export interface RunSummary {
   run_id: string
   status: string
@@ -129,5 +139,20 @@ export interface RunsResponse {
 }
 
 export interface BenchmarkSummary {
-  [key: string]: unknown
+  mode: 'quick' | 'case' | 'full'
+  runner: 'fake' | 'real'
+  offline: boolean
+  selected_cases: number
+  completed_cases: number
+  actually_run_ready_cases: number
+  caught_cases: number
+  real_catch_rate: number | null
+  observed_offline_catch_rate: number | null
+  offline_results_excluded_from_real_rate: boolean
+  false_positive_count: number
+  verifier_accepted_count: number
+  verifier_rejected_count: number
+  needs_human_review_cases: number
+  timed_out_cases: number
+  elapsed_seconds: number
 }

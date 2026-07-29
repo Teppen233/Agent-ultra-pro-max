@@ -24,7 +24,7 @@ const visibleEvents = computed(() => props.events.slice(-10).reverse().map((even
 
 <template>
   <section class="timeline panel">
-    <div class="section-heading compact"><div><span class="eyebrow">PUBLIC EVENT STREAM</span><h2>事件时间线</h2></div><b>{{ events.length }}</b></div>
+    <div class="section-heading compact"><div><span class="eyebrow">公开事件流</span><h2>事件时间线</h2></div><b>{{ events.length }}</b></div>
     <div class="timeline-list">
       <article v-for="event in visibleEvents" :key="event.id" :class="event.type.replace('.', '-')">
         <span class="timeline-dot" />

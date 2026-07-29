@@ -103,6 +103,7 @@ describe('Review Store 事件归约', () => {
 
     expect(store.findings[0]?.title).toBe('状态遗漏')
     expect(store.repository).toBe('reviewcrew/demo')
+    expect(store.resultHydrated).toBe(true)
 
     store.reset()
     expect(store.status).toBe('idle')
@@ -110,15 +111,19 @@ describe('Review Store 事件归约', () => {
     expect(store.lastSequence).toBe(0)
   })
 
-  it('将 Verifier 与报告事件映射到阶段进度', () => {
+  it('使用真实 Orchestrator 阶段顺序且不存在幽灵等待阶段', () => {
     const store = useReviewStore()
     store.applyEvent(event(1, 'review.started', {}))
-    store.applyEvent(event(2, 'verifier.started', { agent: 'verifier' }))
-    store.applyEvent(event(3, 'verifier.completed', { accepted: 1 }))
-    store.applyEvent(event(4, 'report.generated', { status: 'completed' }))
-    store.applyEvent(event(5, 'review.completed', { status: 'completed' }))
+    ;['loading_pr', 'building_context', 'planning', 'team_review'].forEach((stage, index) => {
+      store.applyEvent(event(index * 2 + 2, 'stage.started', { stage }))
+      store.applyEvent(event(index * 2 + 3, 'stage.completed', { stage }))
+    })
+    store.applyEvent(event(10, 'report.generated', { status: 'completed' }))
+    store.applyEvent(event(11, 'review.completed', { status: 'completed' }))
 
-    expect(store.stages.find((stage) => stage.id === 'verifying')?.status).toBe('completed')
-    expect(store.stages.find((stage) => stage.id === 'reporting')?.status).toBe('completed')
+    expect(store.stages.map((stage) => stage.id)).toEqual([
+      'loading_pr', 'building_context', 'planning', 'team_review', 'reporting',
+    ])
+    expect(store.stages.every((stage) => stage.status === 'completed')).toBe(true)
   })
 })

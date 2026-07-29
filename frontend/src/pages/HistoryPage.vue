@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { fetchLatestBenchmark, fetchRuns } from '@/api/client'
 import type { BenchmarkSummary, RunSummary } from '@/contracts'
+import { presentBenchmark } from '@/pages/view-models'
 import { useReviewStore } from '@/stores/review'
 
 const router = useRouter()
@@ -11,6 +12,7 @@ const store = useReviewStore()
 const runs = ref<RunSummary[]>([])
 const benchmark = ref<BenchmarkSummary | null>(null)
 const offline = ref(false)
+const benchmarkView = computed(() => presentBenchmark(benchmark.value))
 
 onMounted(async () => {
   const results = await Promise.allSettled([fetchRuns(), fetchLatestBenchmark()])
@@ -32,23 +34,24 @@ const replayRun = async (runId: string): Promise<void> => {
 
 <template>
   <div class="history-page page-width">
-    <section class="history-heading"><div><span class="eyebrow">HISTORY & BENCHMARK</span><h1>稳定回放与真实评测</h1><p>现场优先播放已保存的最佳运行；每个数字只来自实际完成的 Benchmark。</p></div><button class="primary-button compact-button" @click="replayDemo"><span>播放最佳 Demo</span><b>▶</b></button></section>
-    <section class="benchmark-banner panel">
-      <div><span class="benchmark-logo">B</span><span><small>GREPTILE-STYLE BENCHMARK</small><strong>跨 5 个开源仓库的真实缺陷评测</strong></span></div>
-      <div class="benchmark-metrics"><span><b>{{ benchmark?.completed_cases ?? 12 }}</b> 完成运行</span><span><b>{{ benchmark?.caught_cases ?? 9 }}</b> 成功命中</span><span><b>{{ benchmark?.catch_rate ?? '75%' }}</b> 目标命中率</span><span><b>{{ benchmark?.average_seconds ?? 184 }}s</b> 平均耗时</span></div>
-      <a href="https://www.greptile.com/benchmarks" target="_blank" rel="noreferrer">查看方法 ↗</a>
+    <section class="history-heading"><div><span class="eyebrow">历史与评测</span><h1>稳定回放与可追溯评测</h1><p>现场可播放已保存的演示运行；评测区严格区分真实结果、离线观察值与缺失数据。</p></div><button class="primary-button compact-button" @click="replayDemo"><span>播放离线演示</span><b>▶</b></button></section>
+    <section class="benchmark-banner panel" :class="benchmarkView.kind">
+      <div><span class="benchmark-logo">B</span><span><small>GREPTILE 风格评测</small><strong>{{ benchmarkView.title }}</strong></span></div>
+      <div class="benchmark-metrics"><span><b>{{ benchmarkView.completed }}</b> 完成运行</span><span><b>{{ benchmarkView.caught }}</b> 成功命中</span><span><b>{{ benchmarkView.rate }}</b> {{ benchmarkView.rateLabel }}</span><span><b>{{ benchmarkView.elapsed }}</b> 总耗时</span></div>
+      <a href="https://www.greptile.com/benchmarks" target="_blank" rel="noreferrer">查看评测方法 ↗</a>
+      <p class="benchmark-note">{{ benchmarkView.note }}</p>
     </section>
-    <div v-if="offline" class="offline-note"><span>i</span> 后端当前不可用，下面保留完整离线 Demo；真实历史将在服务恢复后自动显示。</div>
+    <div v-if="offline" class="offline-note" role="status"><span>i</span> 后端当前不可用。评测数字显示“暂无数据”，离线演示仍可正常播放。</div>
     <section class="history-layout">
       <div class="panel run-list">
-        <div class="section-heading"><div><span class="eyebrow">REPLAY LIBRARY</span><h2>历史运行</h2></div><span>{{ runs.length + 1 }} 个可回放记录</span></div>
-        <article class="run-row featured"><span class="run-avatar">AC</span><div class="run-meta"><strong>acme/payments-api <em>最佳演示</em></strong><small>批量退款与租户隔离 · 2026-07-30 09:00</small></div><div class="run-outcome"><span class="critical-dot" />1 严重 · 1 已拒绝</div><div class="run-time">6.0s</div><button @click="replayDemo">回放 ▶</button></article>
-        <article v-for="run in runs" :key="run.run_id" class="run-row"><span class="run-avatar">RC</span><div class="run-meta"><strong>{{ run.run_id }}</strong><small>持久化 PipelineEvent 运行</small></div><div class="run-outcome"><span class="success-dot" />{{ run.status }}</div><div class="run-time">SSE</div><button @click="replayRun(run.run_id)">回放 ▶</button></article>
+        <div class="section-heading"><div><span class="eyebrow">回放记录</span><h2>历史运行</h2></div><span>{{ runs.length + 1 }} 个可回放记录</span></div>
+        <article class="run-row featured"><span class="run-avatar">演</span><div class="run-meta"><strong>acme/payments-api <em>离线演示数据</em></strong><small>批量退款与租户隔离 · 内置公开事件 fixture</small></div><div class="run-outcome"><span class="critical-dot" />1 严重 · 1 已拒绝</div><div class="run-time">演示 6.0s</div><button @click="replayDemo">回放 ▶</button></article>
+        <article v-for="run in runs" :key="run.run_id" class="run-row"><span class="run-avatar">审</span><div class="run-meta"><strong>{{ run.run_id }}</strong><small>持久化公开事件运行</small></div><div class="run-outcome"><span class="success-dot" />{{ run.status }}</div><div class="run-time">服务端回放</div><button @click="replayRun(run.run_id)">回放 ▶</button></article>
       </div>
       <aside class="panel repo-scoreboard">
-        <span class="eyebrow">REPOSITORY COVERAGE</span><h2>五仓评测矩阵</h2>
-        <ul><li><span class="lang python">Py</span><div><strong>Sentry</strong><small>Python · 安全 / 逻辑</small></div><b>3 / 4</b></li><li><span class="lang ts">TS</span><div><strong>Cal.com</strong><small>TypeScript · 业务逻辑</small></div><b>2 / 3</b></li><li><span class="lang go">Go</span><div><strong>Grafana</strong><small>Go · 并发 / 资源</small></div><b>2 / 2</b></li><li><span class="lang java">J</span><div><strong>Keycloak</strong><small>Java · 权限 / 安全</small></div><b>1 / 2</b></li><li><span class="lang ruby">Rb</span><div><strong>Discourse</strong><small>Ruby · 状态机</small></div><b>1 / 1</b></li></ul>
-        <small class="scoreboard-note">演示值用于布局预览；连接后端后优先显示 `/api/benchmarks/latest` 的真实摘要。</small>
+        <span class="eyebrow">仓库覆盖</span><h2>五仓评测范围</h2>
+        <ul><li><span class="lang python">Py</span><div><strong>Sentry</strong><small>Python · 安全 / 逻辑</small></div><b>暂无逐仓数据</b></li><li><span class="lang ts">TS</span><div><strong>Cal.com</strong><small>TypeScript · 业务逻辑</small></div><b>暂无逐仓数据</b></li><li><span class="lang go">Go</span><div><strong>Grafana</strong><small>Go · 并发 / 资源</small></div><b>暂无逐仓数据</b></li><li><span class="lang java">J</span><div><strong>Keycloak</strong><small>Java · 权限 / 安全</small></div><b>暂无逐仓数据</b></li><li><span class="lang ruby">Rb</span><div><strong>Discourse</strong><small>Ruby · 状态机</small></div><b>暂无逐仓数据</b></li></ul>
+        <small class="scoreboard-note">当前摘要契约不包含逐仓成绩，因此不展示推测数字。</small>
       </aside>
     </section>
   </div>

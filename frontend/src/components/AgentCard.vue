@@ -6,6 +6,10 @@ defineProps<{ agent: AgentState; accent: 'cyan' | 'violet' | 'amber' }>()
 const statusText: Record<AgentState['status'], string> = {
   waiting: '等待中', running: '分析中', completed: '已完成', degraded: '已降级', failed: '失败',
 }
+
+const roleText: Record<AgentState['role'], string> = {
+  defect: '缺陷专家', intent: '意图专家', verifier: '独立验证',
+}
 </script>
 
 <template>
@@ -16,7 +20,7 @@ const statusText: Record<AgentState['status'], string> = {
         <svg v-else-if="agent.role === 'intent'" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-4 10.5V18h8v-4.5A6 6 0 0 0 12 3Zm-3 19h6M9 15h6" /></svg>
         <svg v-else viewBox="0 0 24 24"><path d="m4 12 5 5L20 6M12 22a10 10 0 1 1 0-20" /></svg>
       </span>
-      <span><small>{{ agent.role.toUpperCase() }}</small><strong>{{ agent.label }}</strong></span>
+      <span><small>{{ roleText[agent.role] }}</small><strong>{{ agent.label }}</strong></span>
       <em><i />{{ statusText[agent.status] }}</em>
     </div>
     <p v-if="agent.role === 'defect'">静态缺陷 · 安全 · 资源生命周期</p>

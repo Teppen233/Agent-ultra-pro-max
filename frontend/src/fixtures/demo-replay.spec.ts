@@ -22,6 +22,13 @@ describe('完整离线 Demo Replay', () => {
     expect(store.candidates.map((candidate) => candidate.verdict)).toEqual(['accepted', 'rejected'])
     expect(store.findings).toHaveLength(1)
     expect(store.reportReady).toBe(true)
+    expect(store.stages.map((stage) => [stage.id, stage.status])).toEqual([
+      ['loading_pr', 'completed'],
+      ['building_context', 'completed'],
+      ['planning', 'completed'],
+      ['team_review', 'completed'],
+      ['reporting', 'completed'],
+    ])
     expect(demoEvents).not.toContain('prompt')
     expect(demoEvents).not.toContain('reasoning_summary')
   })

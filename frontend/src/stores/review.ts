@@ -11,34 +11,26 @@ import type {
   StageState,
 } from '@/contracts'
 
-const TERMINAL_EVENTS = new Set<PipelineEvent['type']>(['review.completed', 'review.failed'])
-
 const stageLabels: Record<string, string> = {
   loading_pr: '加载 PR',
-  parsing_diff: '解析 Diff',
   building_context: '构建上下文',
   planning: '制定计划',
   team_review: '专家并行审查',
-  reviewing: '专家并行审查',
-  deduplicating: '候选去重',
-  verifying: '独立验证',
   reporting: '生成报告',
-  generating_report: '生成报告',
 }
 
 const initialStages = (): StageState[] => [
   ['loading_pr', '加载 PR'],
-  ['parsing_diff', '解析 Diff'],
   ['building_context', '构建上下文'],
+  ['planning', '制定计划'],
   ['team_review', '专家审查'],
-  ['verifying', '独立验证'],
   ['reporting', '生成报告'],
 ].map(([id, label]) => ({ id: id!, label: label!, status: 'waiting' }))
 
 const initialAgents = (): Record<AgentRole, AgentState> => ({
-  defect: { role: 'defect', label: 'Defect Agent', status: 'waiting', tools: [], candidateCount: 0 },
-  intent: { role: 'intent', label: 'Intent Agent', status: 'waiting', tools: [], candidateCount: 0 },
-  verifier: { role: 'verifier', label: 'Verifier Agent', status: 'waiting', tools: [], candidateCount: 0 },
+  defect: { role: 'defect', label: '缺陷专家', status: 'waiting', tools: [], candidateCount: 0 },
+  intent: { role: 'intent', label: '意图专家', status: 'waiting', tools: [], candidateCount: 0 },
+  verifier: { role: 'verifier', label: '独立验证者', status: 'waiting', tools: [], candidateCount: 0 },
 })
 
 const asString = (value: unknown): string | undefined =>
@@ -96,6 +88,7 @@ export const useReviewStore = defineStore('review', {
     rejectedCount: 0,
     coverage: [] as string[],
     warnings: [] as string[],
+    resultHydrated: false,
   }),
   actions: {
     applyEvent(event: PipelineEvent): void {
@@ -162,7 +155,6 @@ export const useReviewStore = defineStore('review', {
         }
         case 'verifier.started':
           this.agents.verifier.status = 'running'
-          this.setStageStatus('verifying', 'running')
           break
         case 'verifier.accepted':
         case 'verifier.rejected':
@@ -170,7 +162,6 @@ export const useReviewStore = defineStore('review', {
           break
         case 'verifier.completed':
           this.agents.verifier.status = 'completed'
-          this.setStageStatus('verifying', 'completed')
           break
         case 'report.generated':
           this.reportReady = true
@@ -228,6 +219,7 @@ export const useReviewStore = defineStore('review', {
       this.startedAt = result.started_at
       this.completedAt = result.completed_at
       this.elapsedSeconds = result.elapsed_seconds
+      this.resultHydrated = true
       for (const finding of result.findings) {
         const candidate = this.candidates.find((item) => item.finding.id === finding.id)
         if (candidate) candidate.finding = finding

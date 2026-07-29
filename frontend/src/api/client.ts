@@ -3,6 +3,7 @@ import type {
   EventType,
   PipelineEvent,
   ReviewRequest,
+  ReviewResponse,
   ReviewResult,
   RunsResponse,
   StartReviewResponse,
@@ -22,6 +23,7 @@ interface SubscriptionHandlers {
   onOpen?(): void
   onDisconnect?(): void
   onError?(message: string): void
+  onClosed?(terminalType: 'review.completed' | 'review.failed'): void
 }
 
 interface SubscriptionOptions {
@@ -33,6 +35,17 @@ interface SubscriptionOptions {
 interface ReplayOptions {
   speed?: number
   wait?: (milliseconds: number) => Promise<void>
+  signal?: AbortSignal
+  runToken?: string
+  isCurrent?: (token: string) => boolean
+}
+
+interface PollOptions {
+  fetcher?: Fetcher
+  wait?: (milliseconds: number) => Promise<void>
+  signal?: AbortSignal
+  intervalMs?: number
+  onPending?(response: Extract<ReviewResponse, { kind: 'pending' }>): void
 }
 
 const eventTypes = new Set<EventType>([
@@ -101,9 +114,47 @@ export const startReview = (
   body: JSON.stringify(request),
 }, fetcher)
 
-/** 获取一次运行的最终或当前公开状态。 */
-export const fetchReview = (runId: string): Promise<ReviewResult> =>
-  requestJson(`/api/reviews/${encodeURIComponent(runId)}`)
+const asReviewResponse = (value: unknown): ReviewResponse => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('运行状态格式无效。')
+  const payload = value as Record<string, unknown>
+  if (typeof payload.run_id !== 'string' || typeof payload.status !== 'string') {
+    throw new Error('运行状态格式无效。')
+  }
+  const terminal = ['completed', 'partial', 'failed'].includes(payload.status)
+  if (!terminal) return { kind: 'pending', run_id: payload.run_id, status: payload.status }
+  if (
+    typeof payload.repository !== 'string'
+    || typeof payload.base_sha !== 'string'
+    || typeof payload.head_sha !== 'string'
+    || !Array.isArray(payload.findings)
+    || typeof payload.rejected_count !== 'number'
+    || !Array.isArray(payload.coverage)
+    || !Array.isArray(payload.warnings)
+    || typeof payload.started_at !== 'string'
+    || typeof payload.completed_at !== 'string'
+    || typeof payload.elapsed_seconds !== 'number'
+  ) {
+    throw new Error('最终审查结果尚未完整生成。')
+  }
+  return { kind: 'result', result: payload as unknown as ReviewResult }
+}
+
+/** 获取一次运行的可辨识状态或完整最终结果。 */
+export const fetchReview = async (runId: string, fetcher: Fetcher = fetch): Promise<ReviewResponse> =>
+  asReviewResponse(await requestJson<unknown>(`/api/reviews/${encodeURIComponent(runId)}`, undefined, fetcher))
+
+/** 轮询直到完整最终结果可用；运行中响应不会进入 Store 水合。 */
+export const pollReviewResult = async (runId: string, options: PollOptions = {}): Promise<ReviewResponse> => {
+  const wait = options.wait ?? ((milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)))
+  while (!options.signal?.aborted) {
+    const response = await fetchReview(runId, options.fetcher)
+    if (options.signal?.aborted) break
+    if (response.kind === 'result') return response
+    options.onPending?.(response)
+    await wait(options.intervalMs ?? 1000)
+  }
+  return { kind: 'pending', run_id: runId, status: 'cancelled' }
+}
 
 /** 获取有界历史运行列表。 */
 export const fetchRuns = (limit = 50, offset = 0): Promise<RunsResponse> =>
@@ -136,10 +187,14 @@ export const replayEventLog = async (
   const events = parseEventLog(content)
   let previous: PipelineEvent | undefined
   for (const event of events) {
+    if (options.signal?.aborted) return
+    if (options.runToken && options.isCurrent && !options.isCurrent(options.runToken)) return
     if (previous) {
       const gap = Math.max(0, Date.parse(event.timestamp) - Date.parse(previous.timestamp))
       await wait(Math.min(1800, gap / speed))
     }
+    if (options.signal?.aborted) return
+    if (options.runToken && options.isCurrent && !options.isCurrent(options.runToken)) return
     onEvent(event)
     previous = event
   }
@@ -175,7 +230,10 @@ export const createEventSubscription = (
     try {
       const event = asPipelineEvent(JSON.parse(message.data) as unknown)
       handlers.onEvent(event)
-      if (event.type === 'review.completed' || event.type === 'review.failed') close()
+      if (event.type === 'review.completed' || event.type === 'review.failed') {
+        handlers.onClosed?.(event.type)
+        close()
+      }
     } catch {
       handlers.onError?.('收到无法识别的审查事件，已跳过。')
     }
