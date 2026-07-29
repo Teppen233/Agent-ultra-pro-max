@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -19,6 +20,7 @@ from reviewcrew.context.builder import build_context
 from reviewcrew.events import EventStore, PipelineEvent
 from reviewcrew.github.pr_loader import PRLoadError, load_pr
 from reviewcrew.pipeline.dedupe import deduplicate_findings
+from reviewcrew.redaction import sanitize_persisted_value
 from reviewcrew.report import persist_report
 from reviewcrew.schemas import (
     AgentSnapshot,
@@ -103,24 +105,24 @@ class _EventingPublisher(MessagePublisher):
             self._events.emit(
                 self.run_id,
                 "agent.candidate",
-                {
+                sanitize_persisted_value({
                     "agent": sender,
                     "finding_id": finding.get("id"),
                     "file": finding.get("file"),
                     "line": finding.get("line_start"),
                     "severity": finding.get("severity"),
-                },
+                }),
             )
         elif kind in {"agent_completed", "agent_failed"}:
             event_type = "agent.completed" if kind == "agent_completed" else "agent.failed"
             self._events.emit(
                 self.run_id,
                 event_type,
-                {
+                sanitize_persisted_value({
                     "agent": payload.get("agent_id", sender),
                     "role": payload.get("role"),
                     "warning": payload.get("warning"),
-                },
+                }),
             )
         elif kind == "verdict":
             verdict = payload.get("verdict", {})
@@ -128,11 +130,11 @@ class _EventingPublisher(MessagePublisher):
             self._events.emit(
                 self.run_id,
                 event_type,
-                {
+                sanitize_persisted_value({
                     "finding_id": verdict.get("finding_id"),
                     "verdict": verdict.get("verdict"),
                     "confidence": verdict.get("confidence"),
-                },
+                }),
             )
         return True
 
@@ -163,6 +165,7 @@ class Orchestrator:
         report_persister: ReportPersister = persist_report,
         stage_timeouts: Mapping[str, float] | None = None,
         global_timeout_seconds: float | None = None,
+        budget_grace_seconds: float = 5.0,
     ) -> None:
         self.config = config or Config()
         self._pr_loader = pr_loader
@@ -181,11 +184,13 @@ class Orchestrator:
         self._events = event_store or EventStore(self.config.runs_dir)
         self._persist_report = report_persister
         self._global_timeout = global_timeout_seconds or float(self.config.global_timeout_seconds)
+        self._budget_grace_seconds = max(0.0, budget_grace_seconds)
         self._timeouts = {
             "loading_pr": float(self.config.pr_load_timeout_seconds),
             "building_context": float(self.config.context_timeout_seconds),
             "planning": float(self.config.review_timeout_seconds),
             "team_review": float(self.config.review_timeout_seconds),
+            "verifier": float(self.config.verifier_timeout_seconds),
             "reporting": float(self.config.report_timeout_seconds),
             **dict(stage_timeouts or {}),
         }
@@ -206,6 +211,9 @@ class Orchestrator:
                 await self._run_core(request, state)
         except StageTimeoutError as error:
             state.degraded = True
+            if error.stage == "team_review":
+                state.verifier_failed = True
+                self._consume_agent_snapshots(state)
             label = self._STAGE_LABELS[error.stage]
             state.warnings.append(f"{label}阶段超时，已保存当前可用结果。")
         except TimeoutError:
@@ -218,27 +226,63 @@ class Orchestrator:
             state.failed = True
             state.warnings.append(self._safe_failure_message(error))
 
-        result = self._build_result(state)
-        try:
-            await self._run_stage(
-                state,
-                "reporting",
-                lambda: asyncio.to_thread(self._persist_report, result, self.config.runs_dir),
-            )
-        except StageTimeoutError:
-            state.degraded = True
-            state.warnings.append("报告生成阶段超时，结果文件可能不完整。")
-            result = self._build_result(state)
-        except Exception as error:
-            state.degraded = True
-            state.warnings.append(f"报告生成失败：{type(error).__name__}。")
-            result = self._build_result(state)
-        else:
+        result, report_generated = self._finalize_report(state)
+        if report_generated:
             self._events.emit(run_id, "report.generated", {"status": result.status})
 
         final_type = "review.failed" if result.status == "failed" else "review.completed"
         self._events.emit(run_id, final_type, {"status": result.status})
         return result
+
+    def _finalize_report(self, state: _RunState) -> tuple[ReviewResult, bool]:
+        """同步完成报告最终化，确保返回前没有不可取消的后台写入。"""
+
+        stage = "reporting"
+        self._events.emit(state.run_id, "stage.started", {"stage": stage})
+        state.active_stage = stage
+        started = time.perf_counter()
+        draft = self._build_result(state)
+        generation_error: Exception | None = None
+        try:
+            self._persist_report(draft, self.config.runs_dir)
+        except Exception as error:
+            generation_error = error
+
+        exceeded = time.perf_counter() - started > self._timeouts[stage]
+        if exceeded:
+            state.degraded = True
+            state.warnings.append("报告生成阶段超时，已等待写入结束并保存最终部分结果。")
+        if generation_error is not None:
+            state.degraded = True
+            state.warnings.append(f"报告生成失败：{type(generation_error).__name__}。")
+
+        result = self._build_result(state)
+        generated = True
+        try:
+            if generation_error is None:
+                self._persist_report(result, self.config.runs_dir)
+            else:
+                persist_report(result, self.config.runs_dir)
+        except Exception as error:
+            generated = False
+            state.degraded = True
+            state.warnings.append(f"报告最终提交失败：{type(error).__name__}。")
+            result = self._build_result(state)
+
+        if exceeded or generation_error is not None or not generated:
+            self._events.emit(
+                state.run_id,
+                "stage.failed",
+                {
+                    "stage": stage,
+                    "reason": "timeout" if exceeded else "persist_failed",
+                },
+            )
+        else:
+            self._events.emit(state.run_id, "stage.completed", {"stage": stage})
+        state.terminal_stages.add(stage)
+        state.active_stage = None
+        return result, generated
 
     async def _run_core(self, request: ReviewRequest, state: _RunState) -> None:
         state.pr = await self._run_stage(
@@ -259,7 +303,7 @@ class Orchestrator:
                 key=f"context:{context.id}",
                 payload={"context_id": context.id, "files": context.files},
             )
-        planning_budget = Budget(seconds=max(1, int(self._timeouts["team_review"])))
+        planning_budget = Budget(seconds=max(1, int(self._timeouts["planning"])))
         state.plan = await self._run_stage(
             state,
             "planning",
@@ -278,37 +322,39 @@ class Orchestrator:
         if state.pr is None or state.plan is None:
             return
         contexts = state.contexts or [self._empty_context(state.pr)]
-        expected_agent_ids = {
-            f"{role}:{context.id}" for role in ("defect", "intent") for context in contexts
-        }
+        work_items = self._planned_work_items(state.plan, contexts)
+        expected_agent_ids = {f"{role}:{context.id}" for role, context in work_items}
         stop_event = asyncio.Event()
+        semaphore = asyncio.Semaphore(self.config.max_concurrency)
         watcher_task: asyncio.Task[list[Verdict] | None] | None = None
         expert_tasks: list[asyncio.Task[AgentSnapshot | None]] = []
         static_task: asyncio.Task[None] | None = None
+        budget_task: asyncio.Task[None] | None = None
         try:
             async with asyncio.TaskGroup() as group:
                 watcher_task = group.create_task(
                     self._run_verifier(state, expected_agent_ids, stop_event),
                     name="reviewcrew-verifier",
                 )
-                for role, factory in (
-                    ("defect", self._defect_factory),
-                    ("intent", self._intent_factory),
-                ):
-                    for context in contexts:
-                        expert_tasks.append(
-                            group.create_task(
-                                self._run_expert(state, role, factory, context),
-                                name=f"reviewcrew-{role}-{context.id}",
-                            )
+                factories = {"defect": self._defect_factory, "intent": self._intent_factory}
+                for role, context in work_items:
+                    expert_tasks.append(
+                        group.create_task(
+                            self._run_expert(state, role, factories[role], context, semaphore),
+                            name=f"reviewcrew-{role}-{context.id}",
                         )
+                    )
                 if self._static_analyzer is not None:
                     static_task = group.create_task(
-                        self._run_static_analyzer(state),
+                        self._run_static_analyzer(state, semaphore),
                         name="reviewcrew-static",
                     )
+                budget_task = group.create_task(
+                    self._warn_and_collect_before_deadline(state, expected_agent_ids),
+                    name="reviewcrew-budget-warning",
+                )
                 group.create_task(
-                    self._stop_watcher_after_experts(expert_tasks, stop_event),
+                    self._stop_watcher_after_experts(expert_tasks, stop_event, budget_task),
                     name="reviewcrew-watcher-stop",
                 )
         finally:
@@ -317,6 +363,36 @@ class Orchestrator:
                 watcher_task.cancel()
             if static_task is not None and not static_task.done():
                 static_task.cancel()
+            if budget_task is not None and not budget_task.done():
+                budget_task.cancel()
+            self._consume_agent_snapshots(state)
+
+    @staticmethod
+    def _planned_work_items(
+        plan: ReviewPlan,
+        contexts: list[ContextPack],
+    ) -> list[tuple[str, ContextPack]]:
+        """将 Team Lead 的角色与 shard 计划解析为稳定、去重的实例工作项。"""
+
+        contexts_by_id = {context.id: context for context in contexts}
+        fallback_ids = [context_id for context_id in plan.context_ids if context_id in contexts_by_id]
+        work_items: list[tuple[str, ContextPack]] = []
+        seen: set[tuple[str, str]] = set()
+        for role in plan.required_agents:
+            planned_ids = [
+                context_id
+                for shard, context_ids in plan.shards.items()
+                if shard == role or shard.startswith(f"{role}:")
+                for context_id in context_ids
+                if context_id in contexts_by_id
+            ]
+            for context_id in planned_ids or fallback_ids:
+                key = (role, context_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                work_items.append((role, contexts_by_id[context_id]))
+        return work_items
 
     async def _run_expert(
         self,
@@ -324,20 +400,22 @@ class Orchestrator:
         role: str,
         factory: AgentFactory,
         context: ContextPack,
+        semaphore: asyncio.Semaphore,
     ) -> AgentSnapshot | None:
         agent_id = f"{role}:{context.id}"
         self._events.emit(state.run_id, "agent.started", {"agent": agent_id, "role": role})
         agent = factory(state.publisher)
         budget = Budget(seconds=max(1, int(self._timeouts["team_review"])))
         try:
-            snapshot = await self._call_with_supported_keywords(
-                agent.run,
-                context,
-                mailbox=state.mailbox,
-                blackboard=state.blackboard,
-                plan=state.plan,
-                budget=budget,
-            )
+            async with semaphore:
+                snapshot = await self._call_with_supported_keywords(
+                    agent.run,
+                    context,
+                    mailbox=state.mailbox,
+                    blackboard=state.blackboard,
+                    plan=state.plan,
+                    budget=budget,
+                )
             if not isinstance(snapshot, AgentSnapshot):
                 snapshot = AgentSnapshot.model_validate(snapshot)
             state.snapshots[agent_id] = snapshot
@@ -345,7 +423,7 @@ class Orchestrator:
             await self._publish_terminal_if_missing(state, agent_id, role, failed=False)
             return snapshot
         except asyncio.CancelledError:
-            await asyncio.shield(self._publish_budget_warning(state, agent_id, role))
+            self._consume_agent_snapshots(state)
             raise
         except Exception:
             state.degraded = True
@@ -362,10 +440,9 @@ class Orchestrator:
     ) -> list[Verdict] | None:
         self._events.emit(state.run_id, "verifier.started", {"agent": "verifier"})
         verifier = self._verifier_factory(state.publisher)
-        budget = Budget(seconds=max(1, int(self.config.verifier_timeout_seconds)))
+        budget = Budget(seconds=max(1, int(self._timeouts["verifier"])))
         try:
-            verdicts = await self._call_with_supported_keywords(
-                verifier.watch,
+            verdicts = await verifier.watch(
                 state.mailbox,
                 state.blackboard,
                 budget,
@@ -403,14 +480,19 @@ class Orchestrator:
             state.degraded = True
             state.verifier_failed = True
             state.warnings.append("Verifier 执行失败，仅保留高置信候选，且这些候选未经完整验证。")
-            self._events.emit(state.run_id, "agent.failed", {"agent": "verifier", "role": "verifier"})
+            await self._publish_verifier_failure_if_missing(state)
             return None
 
-    async def _run_static_analyzer(self, state: _RunState) -> None:
+    async def _run_static_analyzer(
+        self,
+        state: _RunState,
+        semaphore: asyncio.Semaphore,
+    ) -> None:
         if self._static_analyzer is None or state.pr is None:
             return
         try:
-            signals = await self._static_analyzer(state.pr, state.contexts)
+            async with semaphore:
+                signals = await self._static_analyzer(state.pr, state.contexts)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -430,9 +512,27 @@ class Orchestrator:
         self,
         expert_tasks: list[asyncio.Task[AgentSnapshot | None]],
         stop_event: asyncio.Event,
+        budget_task: asyncio.Task[None],
     ) -> None:
         await asyncio.gather(*expert_tasks, return_exceptions=True)
+        self._consume_agent_snapshots_from_tasks(expert_tasks)
         stop_event.set()
+        if not budget_task.done():
+            budget_task.cancel()
+
+    def _consume_agent_snapshots_from_tasks(
+        self,
+        expert_tasks: list[asyncio.Task[AgentSnapshot | None]],
+    ) -> None:
+        """确保协调器读取任务异常前不遗漏已经完成的快照。"""
+
+        for task in expert_tasks:
+            if task.cancelled() or not task.done():
+                continue
+            try:
+                task.result()
+            except Exception:
+                continue
 
     async def _publish_terminal_if_missing(
         self,
@@ -457,13 +557,64 @@ class Orchestrator:
             },
         )
 
-    async def _publish_budget_warning(self, state: _RunState, agent_id: str, role: str) -> None:
+    async def _warn_and_collect_before_deadline(
+        self,
+        state: _RunState,
+        expected_agent_ids: set[str],
+    ) -> None:
+        """在团队预算到期前发送预警，并在 grace 窗口持续消费快照。"""
+
+        grace = min(self._budget_grace_seconds, self._timeouts["team_review"])
+        await asyncio.sleep(max(0.0, self._timeouts["team_review"] - grace))
+        terminal_ids = {
+            message.payload.get("agent_id")
+            for message in state.blackboard.messages
+            if message.kind in {"agent_completed", "agent_failed"}
+        }
+        for agent_id in sorted(expected_agent_ids - terminal_ids):
+            role = agent_id.split(":", 1)[0]
+            await state.publisher.publish(
+                sender="orchestrator",
+                recipient=agent_id,
+                kind="budget_warning",
+                key=f"budget:{agent_id}",
+                payload={"agent_id": agent_id, "role": role, "request_snapshot": True},
+            )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + grace
+        try:
+            while loop.time() < deadline:
+                self._consume_agent_snapshots(state)
+                await asyncio.sleep(min(0.005, max(0.0, deadline - loop.time())))
+        finally:
+            self._consume_agent_snapshots(state)
+
+    def _consume_agent_snapshots(self, state: _RunState) -> None:
+        """验证并合并 Blackboard 中由预算预警触发的 AgentSnapshot。"""
+
+        for message in state.blackboard.by_kind("agent_snapshot"):
+            payload = message.payload.get("snapshot", message.payload)
+            try:
+                snapshot = AgentSnapshot.model_validate(payload)
+            except (TypeError, ValueError):
+                continue
+            state.snapshots[snapshot.agent_id] = snapshot
+
+    async def _publish_verifier_failure_if_missing(self, state: _RunState) -> None:
+        """仅在 watcher 没有自行发布失败终态时补发一次。"""
+
+        if any(
+            message.kind in {"agent_completed", "agent_failed"}
+            and message.payload.get("agent_id") == "verifier"
+            for message in state.blackboard.messages
+        ):
+            return
         await state.publisher.publish(
-            sender="orchestrator",
-            recipient=agent_id,
-            kind="budget_warning",
-            key=f"budget:{agent_id}",
-            payload={"agent_id": agent_id, "role": role, "request_snapshot": True},
+            sender="verifier",
+            recipient="*",
+            kind="agent_failed",
+            key="failed",
+            payload={"agent_id": "verifier", "role": "verifier", "warning": "Verifier 执行未完成。"},
         )
 
     async def _run_stage(

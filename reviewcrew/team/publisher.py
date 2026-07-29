@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
+from reviewcrew.redaction import sanitize_persisted_value
 from reviewcrew.schemas import TeamMessage
 from reviewcrew.team.blackboard import EvidenceBlackboard
 from reviewcrew.team.mailbox import Mailbox
@@ -66,7 +67,13 @@ class MessagePublisher:
             expires_at=expires_at,
             payload=payload,
         )
-        if self.mailbox is not None and not await self.mailbox.publish(message):
+        persisted_message = message.model_copy(
+            update={"payload": sanitize_persisted_value(message.payload)}
+        )
+        if self.mailbox is not None and not await self.mailbox.publish(
+            message,
+            persisted_message=persisted_message,
+        ):
             return False
         if self.blackboard is not None:
             self.blackboard.apply(message)

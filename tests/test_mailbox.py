@@ -7,6 +7,7 @@ import pytest
 from reviewcrew.schemas import TeamMessage
 from reviewcrew.team.blackboard import EvidenceBlackboard
 from reviewcrew.team.mailbox import Mailbox
+from reviewcrew.team.publisher import MessagePublisher
 
 
 def make_message(
@@ -87,3 +88,35 @@ def test_blackboard_applies_message_idempotently() -> None:
 
     assert len(blackboard.messages) == 1
 
+
+@pytest.mark.asyncio
+async def test_publisher_persists_redacted_candidate_but_delivers_full_payload(tmp_path) -> None:
+    """磁盘审计消息必须脱敏，但 Verifier 的内存队列仍需完整 Finding。"""
+
+    mailbox = Mailbox(tmp_path, "run-redacted")
+    mailbox.register("verifier")
+    blackboard = EvidenceBlackboard("run-redacted")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    payload = {
+        "finding": {
+            "id": "finding-1",
+            "title": "公开标题",
+            "reasoning_summary": "私密思维链 sensitive-chain",
+            "description": "不得保存完整 Prompt 或模型响应 sensitive-response",
+        }
+    }
+
+    await publisher.publish(
+        sender="defect:ctx-1",
+        recipient="verifier",
+        kind="candidate_finding",
+        key="candidate:finding-1",
+        payload=payload,
+    )
+
+    delivered = await mailbox.receive_one("verifier", timeout=0.1)
+    persisted = (tmp_path / "run-redacted" / "mailbox.jsonl").read_text(encoding="utf-8")
+    assert delivered.payload["finding"]["reasoning_summary"] == "私密思维链 sensitive-chain"
+    assert blackboard.messages[0].payload["finding"]["reasoning_summary"] == "私密思维链 sensitive-chain"
+    for forbidden in ("reasoning_summary", "sensitive-chain", "Prompt", "响应", "sensitive-response", "思维链"):
+        assert forbidden not in persisted

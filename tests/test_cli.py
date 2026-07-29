@@ -136,3 +136,36 @@ def test_cli_missing_replay_returns_nonzero_with_chinese_error(tmp_path: Path, c
     output = capsys.readouterr()
     assert exit_code != 0
     assert "未找到运行" in output.err
+
+
+def test_cli_missing_required_option_returns_code_instead_of_system_exit(tmp_path: Path, capsys) -> None:
+    """argparse 缺必需参数时 main 必须返回整数并只输出中文错误。"""
+
+    exit_code = main(["replay"], config=Config(runs_dir=tmp_path / "runs"))
+
+    output = capsys.readouterr()
+    assert exit_code == 2
+    assert "参数" in output.err and "错误" in output.err
+    assert "required" not in output.err.casefold()
+
+
+def test_cli_unknown_option_and_subcommand_return_chinese_errors(tmp_path: Path, capsys) -> None:
+    """未知选项和非法子命令不能抛 SystemExit 或输出英文 argparse 错误。"""
+
+    option_code = main(["review", "--unknown"], config=Config(runs_dir=tmp_path / "runs"))
+    option_error = capsys.readouterr().err
+    command_code = main(["unknown-command"], config=Config(runs_dir=tmp_path / "runs"))
+    command_error = capsys.readouterr().err
+
+    assert option_code == command_code == 2
+    assert "参数错误" in option_error
+    assert "参数错误" in command_error
+    assert "unrecognized" not in option_error.casefold()
+    assert "invalid choice" not in command_error.casefold()
+
+
+def test_cli_help_returns_zero_from_main(capsys) -> None:
+    """帮助路径作为库调用时返回 0，不向调用者抛 SystemExit。"""
+
+    assert main(["--help"]) == 0
+    assert "ReviewCrew 智能代码审查" in capsys.readouterr().out

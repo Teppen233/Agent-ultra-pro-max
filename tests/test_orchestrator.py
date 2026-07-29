@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 
 from reviewcrew.config import Config
 from reviewcrew.pipeline.orchestrator import Orchestrator
+from reviewcrew.report import persist_report
 from reviewcrew.schemas import (
     AgentSnapshot,
     Budget,
@@ -23,6 +25,7 @@ from reviewcrew.schemas import (
     StaticSignal,
     Verdict,
 )
+from reviewcrew.team.publisher import MessagePublisher
 
 
 def make_pr() -> PRData:
@@ -229,6 +232,13 @@ async def test_review_streams_first_candidate_before_experts_finish_and_persists
     persisted = (run_dir / "result.json").read_text(encoding="utf-8")
     assert "reasoning_summary" not in persisted
     assert "Fake 证据充分" not in persisted
+    run_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in run_dir.iterdir()
+        if path.is_file()
+    )
+    for forbidden in ("reasoning_summary", "Prompt", "响应", "思维链"):
+        assert forbidden not in run_text
 
 
 class EmptyVerifier:
@@ -490,3 +500,416 @@ async def test_unknown_exception_text_is_not_persisted_in_warning(tmp_path: Path
     persisted = (tmp_path / "runs" / result.run_id / "result.json").read_text(encoding="utf-8")
     assert "sensitive-output" not in persisted
     assert "ValueError" in persisted
+
+
+@pytest.mark.asyncio
+async def test_multi_context_watcher_waits_for_late_candidate_from_every_planned_instance(tmp_path: Path) -> None:
+    """实例级 watcher 必须等到计划中的全部分片结束，不能漏掉后到候选。"""
+
+    contexts = [
+        make_context().model_copy(update={"id": "ctx-fast"}),
+        make_context().model_copy(update={"id": "ctx-late"}),
+    ]
+    fast_done = asyncio.Event()
+    intent_runs: list[str] = []
+    finding = make_finding()
+
+    async def contexts_builder(pr: PRData, request: ReviewRequest, config: Config) -> list[ContextPack]:
+        return contexts
+
+    class ShardedLead:
+        async def plan(self, pr: PRData, packs: list[ContextPack], budget: Budget) -> ReviewPlan:
+            return ReviewPlan(
+                summary="仅运行 Defect 两个分片",
+                required_agents=["defect"],
+                context_ids=[item.id for item in packs],
+                shards={"defect": ["ctx-fast", "ctx-late"]},
+                budget_seconds=budget.seconds,
+            )
+
+    class LateExpert:
+        async def run(self, context: ContextPack, *, mailbox, blackboard, **_: object) -> AgentSnapshot:
+            if context.id == "ctx-fast":
+                fast_done.set()
+                return AgentSnapshot(agent_id="defect:ctx-fast")
+            await fast_done.wait()
+            await asyncio.sleep(0.01)
+            publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+            await publisher.publish(
+                sender="defect:ctx-late",
+                recipient="verifier",
+                kind="candidate_finding",
+                key=f"candidate:{finding.id}",
+                payload={"finding": finding.model_dump(mode="json"), "context_id": context.id},
+                correlation_id=finding.id,
+            )
+            return AgentSnapshot(agent_id="defect:ctx-late", findings=[finding])
+
+    class InstanceWatcher:
+        async def watch(
+            self,
+            mailbox,
+            blackboard,
+            budget: Budget,
+            *,
+            expected_agent_ids: set[str],
+            stop_event: asyncio.Event,
+        ) -> list[Verdict]:
+            assert expected_agent_ids == {"defect:ctx-fast", "defect:ctx-late"}
+            mailbox.register("verifier")
+            candidate: Finding | None = None
+            terminals: set[str] = set()
+            while not expected_agent_ids.issubset(terminals):
+                message = await mailbox.receive_one("verifier", timeout=1)
+                if message.kind == "candidate_finding":
+                    candidate = Finding.model_validate(message.payload["finding"])
+                if message.kind in {"agent_completed", "agent_failed"}:
+                    terminals.add(message.payload["agent_id"])
+            assert candidate is not None
+            return [
+                Verdict(
+                    finding_id=candidate.id,
+                    accepted=True,
+                    verdict="confirmed",
+                    confidence=0.9,
+                    severity="high",
+                    reason="后到候选已验证。",
+                    final_finding=candidate,
+                )
+            ]
+
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=contexts_builder,
+        team_lead=ShardedLead(),
+        defect_factory=lambda publisher: LateExpert(),
+        intent_factory=lambda publisher: intent_runs.append("unexpected") or SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: InstanceWatcher(),
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    assert [item.id for item in result.findings] == [finding.id]
+    assert intent_runs == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_watcher_without_instance_contract_is_rejected_instead_of_silently_degraded(tmp_path: Path) -> None:
+    """缺少实例级参数的旧 watcher 必须显式失败，不能静默退回角色级收敛。"""
+
+    class LegacyWatcher:
+        async def watch(self, mailbox, blackboard, budget: Budget) -> list[Verdict]:
+            return []
+
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: LegacyWatcher(),
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    assert result.status == "partial"
+    assert any("Verifier" in warning and "失败" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_plan_shards_and_max_concurrency_control_actual_expert_work(tmp_path: Path) -> None:
+    """只运行计划分片，且同时执行的专家不得超过 max_concurrency。"""
+
+    contexts = [make_context().model_copy(update={"id": f"ctx-{index}"}) for index in range(4)]
+    active = 0
+    peak = 0
+    runs: list[tuple[str, str]] = []
+
+    async def contexts_builder(pr: PRData, request: ReviewRequest, config: Config) -> list[ContextPack]:
+        return contexts
+
+    class PlannedLead:
+        async def plan(self, pr: PRData, packs: list[ContextPack], budget: Budget) -> ReviewPlan:
+            return ReviewPlan(
+                summary="受限并发",
+                required_agents=["defect", "intent"],
+                context_ids=[item.id for item in packs],
+                shards={"defect": ["ctx-0", "ctx-1", "ctx-2"], "intent": ["ctx-3"]},
+                budget_seconds=budget.seconds,
+            )
+
+    class CountingExpert:
+        def __init__(self, role: str) -> None:
+            self.role = role
+
+        async def run(self, context: ContextPack, **_: object) -> AgentSnapshot:
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            runs.append((self.role, context.id))
+            await asyncio.sleep(0.02)
+            active -= 1
+            return AgentSnapshot(agent_id=f"{self.role}:{context.id}")
+
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs", max_concurrency=2),
+        pr_loader=fake_loader,
+        context_builder=contexts_builder,
+        team_lead=PlannedLead(),
+        defect_factory=lambda publisher: CountingExpert("defect"),
+        intent_factory=lambda publisher: CountingExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    assert result.status == "completed"
+    assert set(runs) == {("defect", "ctx-0"), ("defect", "ctx-1"), ("defect", "ctx-2"), ("intent", "ctx-3")}
+    assert peak <= 2
+
+
+@pytest.mark.asyncio
+async def test_real_style_verifier_failure_publishes_one_terminal_event(tmp_path: Path) -> None:
+    """watcher 自己发布失败终态后抛错时，Orchestrator 不得重复生成终态。"""
+
+    class PublishingFailure:
+        def __init__(self, publisher) -> None:
+            self.publisher = publisher
+
+        async def watch(self, mailbox, blackboard, budget: Budget, **_: object) -> list[Verdict]:
+            await self.publisher.publish(
+                sender="verifier",
+                recipient="*",
+                kind="agent_failed",
+                key="failed",
+                payload={"agent_id": "verifier", "role": "verifier", "warning": "Verifier 执行未完成。"},
+            )
+            raise RuntimeError("boom")
+
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: PublishingFailure(publisher),
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    failed = [
+        event
+        for event in Orchestrator.read_events(tmp_path / "runs", result.run_id)
+        if event.type == "agent.failed" and event.data.get("agent") == "verifier"
+    ]
+    assert len(failed) == 1
+
+
+@pytest.mark.asyncio
+async def test_budget_warning_precedes_cancellation_and_agent_snapshot_is_recovered(tmp_path: Path) -> None:
+    """预算到期前应预警并在有界 grace 内消费专家快照。"""
+
+    finding = make_finding(confidence=0.91)
+    warning_seen = asyncio.Event()
+    cancelled_after_warning = False
+
+    class SnapshotLead:
+        async def plan(self, pr: PRData, packs: list[ContextPack], budget: Budget) -> ReviewPlan:
+            return ReviewPlan(
+                summary="仅 Defect",
+                required_agents=["defect"],
+                context_ids=[packs[0].id],
+                shards={"defect": [packs[0].id]},
+                budget_seconds=budget.seconds,
+            )
+
+    class SnapshotOnWarning:
+        def __init__(self, publisher) -> None:
+            self.publisher = publisher
+
+        async def run(self, context: ContextPack, *, mailbox, **_: object) -> AgentSnapshot:
+            nonlocal cancelled_after_warning
+            agent_id = f"defect:{context.id}"
+            mailbox.register(agent_id)
+            try:
+                message = await mailbox.receive_one(agent_id, timeout=1)
+                assert message.kind == "budget_warning"
+                warning_seen.set()
+                snapshot = AgentSnapshot(agent_id=agent_id, findings=[finding], pending_checks=["剩余检查"])
+                await self.publisher.publish(
+                    sender=agent_id,
+                    recipient="orchestrator",
+                    kind="agent_snapshot",
+                    key="snapshot",
+                    payload={"snapshot": snapshot.model_dump(mode="json")},
+                )
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                cancelled_after_warning = warning_seen.is_set()
+                raise
+
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=SnapshotLead(),
+        defect_factory=lambda publisher: SnapshotOnWarning(publisher),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+        stage_timeouts={"team_review": 0.08},
+        budget_grace_seconds=0.04,
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    assert result.status == "partial"
+    assert warning_seen.is_set()
+    assert cancelled_after_warning is True
+    assert [item.id for item in result.findings] == [finding.id]
+
+
+@pytest.mark.asyncio
+async def test_planning_and_verifier_receive_their_own_injected_budgets(tmp_path: Path) -> None:
+    """Team Lead 与 Verifier 的 Budget 必须来自各自阶段配置。"""
+
+    observed: dict[str, int] = {}
+
+    class BudgetLead(FakeLead):
+        async def plan(self, pr: PRData, contexts: list[ContextPack], budget: Budget) -> ReviewPlan:
+            observed["planning"] = budget.seconds
+            return await super().plan(pr, contexts, budget)
+
+    class BudgetVerifier(EmptyVerifier):
+        async def watch(self, mailbox, blackboard, budget: Budget, *, stop_event: asyncio.Event, **kwargs: object) -> list[Verdict]:
+            observed["verifier"] = budget.seconds
+            return await super().watch(mailbox, blackboard, budget, stop_event=stop_event, **kwargs)
+
+    await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=BudgetLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: BudgetVerifier(),
+        stage_timeouts={"planning": 7, "verifier": 11},
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    assert observed == {"planning": 7, "verifier": 11}
+
+
+@pytest.mark.asyncio
+async def test_reporting_timeout_finishes_all_writes_and_persists_same_partial_result(tmp_path: Path) -> None:
+    """报告超时后不得遗留后台线程，返回值与磁盘最终状态必须一致。"""
+
+    active = False
+
+    def slow_persister(result, runs_directory):
+        nonlocal active
+        active = True
+        time.sleep(0.03)
+        paths = persist_report(result, runs_directory)
+        active = False
+        return paths
+
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+        report_persister=slow_persister,
+        stage_timeouts={"reporting": 0.01},
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    result_path = tmp_path / "runs" / result.run_id / "result.json"
+    assert active is False
+    assert result.status == "partial"
+    assert json.loads(result_path.read_text(encoding="utf-8"))["status"] == "partial"
+    before = result_path.read_bytes()
+    await asyncio.sleep(0.05)
+    assert result_path.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_elapsed_seconds_includes_report_finalization(tmp_path: Path) -> None:
+    """最终结果与报告中的总耗时必须覆盖报告生成耗时。"""
+
+    def slow_persister(result, runs_directory):
+        time.sleep(0.03)
+        return persist_report(result, runs_directory)
+
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+        report_persister=slow_persister,
+        stage_timeouts={"reporting": 1},
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    persisted = json.loads(
+        (tmp_path / "runs" / result.run_id / "result.json").read_text(encoding="utf-8")
+    )
+    assert result.elapsed_seconds >= 0.03
+    assert persisted["elapsed_seconds"] == result.elapsed_seconds
+
+
+@pytest.mark.asyncio
+async def test_entire_run_directory_redacts_sensitive_structured_output_text(tmp_path: Path) -> None:
+    """即使 Agent 把敏感内容放入公开字段，整个运行目录也不得落盘。"""
+
+    finding = make_finding().model_copy(
+        update={
+            "title": "Prompt 泄漏 sensitive-prompt",
+            "description": "模型响应 sensitive-response",
+            "reasoning_summary": "思维链 sensitive-chain",
+        }
+    )
+
+    class SensitiveExpert:
+        async def run(self, context: ContextPack, **_: object) -> AgentSnapshot:
+            return AgentSnapshot(
+                agent_id=f"defect:{context.id}",
+                findings=[finding],
+                warnings=["模型响应包含 sensitive-warning"],
+            )
+
+    class AcceptingVerifier:
+        async def watch(self, mailbox, blackboard, budget: Budget, *, stop_event: asyncio.Event, **_: object) -> list[Verdict]:
+            await stop_event.wait()
+            return [
+                Verdict(
+                    finding_id=finding.id,
+                    accepted=True,
+                    verdict="confirmed",
+                    confidence=0.9,
+                    severity="high",
+                    reason="已验证。",
+                    final_finding=finding,
+                )
+            ]
+
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SensitiveExpert(),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: AcceptingVerifier(),
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    run_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (tmp_path / "runs" / result.run_id).iterdir()
+        if path.is_file()
+    )
+    for forbidden in (
+        "reasoning_summary",
+        "Prompt",
+        "响应",
+        "思维链",
+        "sensitive-prompt",
+        "sensitive-response",
+        "sensitive-chain",
+        "sensitive-warning",
+    ):
+        assert forbidden not in run_text

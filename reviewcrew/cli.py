@@ -16,11 +16,32 @@ from reviewcrew.schemas import ReviewRequest
 OrchestratorFactory = Callable[[Config], object]
 
 
+class _ParserExit(Exception):
+    """把 argparse 的进程退出转换为可测试的返回码。"""
+
+    def __init__(self, status: int, message: str | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+class ChineseArgumentParser(argparse.ArgumentParser):
+    """统一输出中文参数错误，并禁止库调用路径抛出 SystemExit。"""
+
+    def error(self, message: str) -> None:
+        raise _ParserExit(2, "参数错误：命令、选项或必填参数无效，请检查后重试。")
+
+    def exit(self, status: int = 0, message: str | None = None) -> None:
+        if status == 0:
+            raise _ParserExit(0)
+        raise _ParserExit(status, "参数错误：命令行解析失败。")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构造 review 与 replay 两个基础子命令。"""
 
-    parser = argparse.ArgumentParser(prog="reviewcrew", description="ReviewCrew 智能代码审查")
-    commands = parser.add_subparsers(dest="command")
+    parser = ChineseArgumentParser(prog="reviewcrew", description="ReviewCrew 智能代码审查")
+    commands = parser.add_subparsers(dest="command", parser_class=ChineseArgumentParser)
     review = commands.add_parser("review", help="审查 GitHub PR 或本地 base/head")
     review.add_argument("--pr", help="GitHub PR URL")
     review.add_argument("--repo", help="本地 Git 仓库路径")
@@ -49,6 +70,10 @@ def main(
         if arguments.command == "replay":
             return _run_replay(arguments.run_id, effective_config)
         raise ValueError("请指定 review 或 replay 子命令")
+    except _ParserExit as error:
+        if error.message:
+            print(f"错误：{error.message}", file=sys.stderr)
+        return error.status
     except ValueError as error:
         print(f"错误：{error}", file=sys.stderr)
         return 2
@@ -118,4 +143,3 @@ def _run_replay(run_id: str, config: Config) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

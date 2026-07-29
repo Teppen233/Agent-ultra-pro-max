@@ -31,20 +31,28 @@ class Mailbox:
 
         self._queues[agent_id]
 
-    async def publish(self, message: TeamMessage) -> bool:
-        """发布消息；重复或过期消息返回 False。"""
+    async def publish(
+        self,
+        message: TeamMessage,
+        *,
+        persisted_message: TeamMessage | None = None,
+    ) -> bool:
+        """发布完整内存消息，并可将独立脱敏副本写入审计文件。"""
 
         if message.run_id != self.run_id:
             raise ValueError("消息运行标识与 Mailbox 不一致")
         if message.expires_at is not None and message.expires_at <= datetime.now(UTC):
             return False
+        audit_message = persisted_message or message
+        if audit_message.id != message.id or audit_message.run_id != message.run_id:
+            raise ValueError("持久化消息必须与投递消息具有相同标识")
 
         async with self._lock:
             if message.id in self._published_ids:
                 return False
             self._published_ids.add(message.id)
             with (self.run_dir / "mailbox.jsonl").open("a", encoding="utf-8") as file:
-                file.write(message.model_dump_json() + "\n")
+                file.write(audit_message.model_dump_json() + "\n")
 
             if message.recipient == "*":
                 recipients = list(self._queues)
@@ -69,4 +77,3 @@ class Mailbox:
         """返回一条消息被送入收件队列的次数。"""
 
         return self._delivered[message_id]
-

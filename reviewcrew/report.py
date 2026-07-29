@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
+from reviewcrew.redaction import redact_sensitive_text, sanitize_persisted_value
 from reviewcrew.schemas import Finding, ReviewResult
 
 
@@ -57,11 +58,11 @@ def render_markdown(result: ReviewResult) -> str:
         "",
         "## 概览",
         "",
-        f"- 运行 ID：{result.run_id}",
+        f"- 运行 ID：{redact_sensitive_text(result.run_id)}",
         f"- 状态：{_STATUS_LABELS[result.status]}",
-        f"- 仓库：{result.repository}",
-        f"- 基准提交：{result.base_sha}",
-        f"- 目标提交：{result.head_sha}",
+        f"- 仓库：{redact_sensitive_text(result.repository)}",
+        f"- 基准提交：{redact_sensitive_text(result.base_sha)}",
+        f"- 目标提交：{redact_sensitive_text(result.head_sha)}",
         f"- 已确认问题：{len(findings)}",
         f"- 已拒绝候选：{result.rejected_count}",
         f"- 总耗时：{result.elapsed_seconds:.2f} 秒",
@@ -74,28 +75,29 @@ def render_markdown(result: ReviewResult) -> str:
 
     for finding in findings:
         evidence = "；".join(
-            f"{item.source}：{item.file}:{item.start_line}-{item.end_line}（{item.description}）"
+            f"{redact_sensitive_text(item.source)}：{redact_sensitive_text(item.file)}:"
+            f"{item.start_line}-{item.end_line}（{redact_sensitive_text(item.description)}）"
             for item in finding.evidence
         )
         lines.extend(
             [
                 "",
-                f"### {_SEVERITY_LABELS[finding.severity]}：{finding.title}",
+                f"### {_SEVERITY_LABELS[finding.severity]}：{redact_sensitive_text(finding.title)}",
                 "",
                 f"- **严重度**：{_SEVERITY_LABELS[finding.severity]}",
-                f"- **类别**：{finding.category}",
-                f"- **位置**：{_location(finding)}",
-                f"- **触发条件**：{finding.trigger_condition}",
-                f"- **影响**：{finding.impact}",
+                f"- **类别**：{redact_sensitive_text(finding.category)}",
+                f"- **位置**：{redact_sensitive_text(_location(finding))}",
+                f"- **触发条件**：{redact_sensitive_text(finding.trigger_condition)}",
+                f"- **影响**：{redact_sensitive_text(finding.impact)}",
                 f"- **证据**：{evidence}",
-                f"- **建议**：{finding.suggestion or '暂无建议'}",
+                f"- **建议**：{redact_sensitive_text(finding.suggestion or '暂无建议')}",
                 "- **Verifier 状态**：已确认（最终审查结果）",
             ]
         )
 
     lines.extend(["", "## 警告", ""])
     if result.warnings:
-        lines.extend(f"- {warning}" for warning in result.warnings)
+        lines.extend(f"- {redact_sensitive_text(warning)}" for warning in result.warnings)
     else:
         lines.append("- 无")
     return "\n".join(lines) + "\n"
@@ -104,13 +106,11 @@ def render_markdown(result: ReviewResult) -> str:
 def _safe_payload(result: ReviewResult) -> dict[str, Any]:
     """生成可公开保存的结果快照，移除内部推理摘要。"""
 
-    payload = result.model_dump(mode="json")
+    payload = sanitize_persisted_value(result.model_dump(mode="json"))
     findings = _sorted_findings(result.findings)
-    payload["findings"] = []
-    for finding in findings:
-        finding_payload = finding.model_dump(mode="json")
-        finding_payload.pop("reasoning_summary", None)
-        payload["findings"].append(finding_payload)
+    payload["findings"] = [
+        sanitize_persisted_value(finding.model_dump(mode="json")) for finding in findings
+    ]
     return payload
 
 
