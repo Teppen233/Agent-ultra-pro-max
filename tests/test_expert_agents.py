@@ -578,6 +578,37 @@ async def test_cancelled_expert_publishes_only_failed_terminal(tmp_path) -> None
 
 
 @pytest.mark.asyncio
+async def test_expert_waits_for_verifier_after_announcing_initial_review_complete(tmp_path) -> None:
+    """专家先声明候选发布完毕，收到 Verifier 终态后立即结束协作等待。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    mailbox = Mailbox(tmp_path, "run-review-barrier")
+    blackboard = EvidenceBlackboard("run-review-barrier")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    task = asyncio.create_task(
+        DefectAgent(collaboration_window_seconds=1.0).run(
+            make_context(), mailbox=mailbox, blackboard=blackboard
+        )
+    )
+    async with asyncio.timeout(0.2):
+        while not blackboard.by_kind("agent_review_completed"):
+            await asyncio.sleep(0)
+    assert not task.done()
+
+    await publisher.publish(
+        sender="verifier",
+        recipient="*",
+        kind="agent_completed",
+        key="completed",
+        payload={"agent_id": "verifier", "role": "verifier"},
+    )
+
+    await asyncio.wait_for(task, timeout=0.2)
+    assert len(blackboard.by_kind("agent_completed")) == 2
+
+
+@pytest.mark.asyncio
 async def test_cancelled_real_expert_publishes_snapshot_before_unique_failed_terminal(tmp_path) -> None:
     """真实专家在预算取消边界先发布安全快照，再发布唯一失败终态。"""
 

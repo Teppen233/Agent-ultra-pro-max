@@ -394,7 +394,7 @@ class VerifierAgent:
     def _terminal_agent_id(message: TeamMessage) -> str | None:
         """从专家终态中提取完整实例标识。"""
 
-        if message.kind not in {"agent_completed", "agent_failed"}:
+        if message.kind not in {"agent_review_completed", "agent_completed", "agent_failed"}:
             return None
         agent_id = message.payload.get("agent_id")
         return agent_id if isinstance(agent_id, str) and agent_id else message.sender

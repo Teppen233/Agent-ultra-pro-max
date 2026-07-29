@@ -164,6 +164,37 @@ async def wait_for_kind(blackboard: EvidenceBlackboard, kind: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_watch_treats_initial_review_completion_as_candidate_barrier(tmp_path) -> None:
+    """所有专家声明候选发布完毕后，Verifier 无候选时应立即收敛。"""
+
+    mailbox = Mailbox(tmp_path, "run-review-completed")
+    blackboard = EvidenceBlackboard("run-review-completed")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    watcher = asyncio.create_task(
+        VerifierAgent().watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2),
+            expected_agent_ids=EXPECTED_EXPERTS,
+        )
+    )
+    await asyncio.sleep(0)
+    for role in ("defect", "intent"):
+        await publisher.publish(
+            sender=f"{role}:ctx-sql",
+            recipient="*",
+            kind="agent_review_completed",
+            key="review-completed",
+            payload={"agent_id": f"{role}:ctx-sql", "role": role},
+        )
+
+    verdicts = await asyncio.wait_for(watcher, timeout=0.2)
+
+    assert verdicts == []
+    assert blackboard.by_kind("agent_completed")[-1].payload["agent_id"] == "verifier"
+
+
+@pytest.mark.asyncio
 async def test_watch_rejects_candidate_with_upstream_validation_as_false_positive(tmp_path) -> None:
     """存在上游保护的候选必须被假模型裁决为误报。"""
 

@@ -284,6 +284,7 @@ MessageKind = Literal[
     "evidence_response",
     "verdict",
     "agent_snapshot",
+    "agent_review_completed",
     "agent_completed",
     "agent_failed",
     "budget_warning",

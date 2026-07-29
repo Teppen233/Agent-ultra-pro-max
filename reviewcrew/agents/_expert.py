@@ -100,6 +100,14 @@ class ExpertAgent:
             await self._respond_to_requests(
                 snapshot, context, mailbox, blackboard, publisher, effective_budget, deadline
             )
+            await self._publish(
+                context,
+                publisher,
+                kind="agent_review_completed",
+                recipient="*",
+                key="review-completed",
+                payload={"agent_id": agent_id, "role": self.role, "context_id": context.id},
+            )
             await self._consume_collaboration_window(
                 snapshot, context, mailbox, publisher, effective_budget, deadline
             )
@@ -403,6 +411,8 @@ class ExpertAgent:
                 message = await mailbox.receive_one(snapshot.agent_id, timeout=max(0.0, deadline - loop.time()))
             except TimeoutError:
                 break
+            if message.kind in {"agent_completed", "agent_failed"} and message.payload.get("agent_id") == "verifier":
+                break
             if message.kind not in {"handoff_request", "verification_request"}:
                 continue
             board = EvidenceBlackboard(message.run_id, messages=[message])
@@ -413,7 +423,7 @@ class ExpertAgent:
         context: ContextPack,
         publisher: MessagePublisher | None,
         *,
-        kind: Literal["candidate_finding", "handoff_response", "evidence_response", "agent_snapshot", "agent_completed", "agent_failed"],
+        kind: Literal["candidate_finding", "handoff_response", "evidence_response", "agent_snapshot", "agent_review_completed", "agent_completed", "agent_failed"],
         recipient: str,
         key: str,
         payload: dict[str, Any],
