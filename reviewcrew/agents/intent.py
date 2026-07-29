@@ -22,6 +22,7 @@ class IntentAgent(ExpertAgent, ReviewAgentProtocol):
         config: Config | None = None,
         runtime: AgentRuntime | None = None,
         tools: tuple[Any, ...] = (),
+        collaboration_window_seconds: float = 0.1,
     ) -> None:
         super().__init__(
             role="intent",
@@ -30,6 +31,7 @@ class IntentAgent(ExpertAgent, ReviewAgentProtocol):
             config=config,
             runtime=runtime,
             tools=tools,
+            collaboration_window_seconds=collaboration_window_seconds,
         )
 
     def _checks(self) -> list[str]:

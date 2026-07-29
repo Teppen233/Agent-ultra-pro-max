@@ -11,7 +11,7 @@ from reviewcrew.config import Config
 from reviewcrew.hooks import HookContext, HookManager
 from reviewcrew.agents.team_lead import TeamLeadAgent
 from reviewcrew.schemas import Budget as SchemaBudget
-from reviewcrew.schemas import CodeEvidence, ContextPack, Finding, PRData, ReviewPlan, Verdict
+from reviewcrew.schemas import AgentSnapshot, CodeEvidence, ContextPack, Finding, PRData, ReviewPlan, Verdict
 from reviewcrew.skills.registry import SkillRegistry
 
 
@@ -63,15 +63,15 @@ def make_finding() -> Finding:
 class Expert(ReviewAgentProtocol):
     """返回有效 Finding 的测试专家。"""
 
-    async def run(self, context: ContextPack) -> list[Finding]:
-        return [make_finding()]
+    async def run(self, context: ContextPack) -> AgentSnapshot:
+        return AgentSnapshot(agent_id="expert", findings=[make_finding()])
 
 
 class InvalidExpert(ReviewAgentProtocol):
     """返回非法结果的测试专家。"""
 
-    async def run(self, context: ContextPack) -> list[Finding]:
-        return [object()]  # type: ignore[list-item]
+    async def run(self, context: ContextPack) -> AgentSnapshot:
+        return object()  # type: ignore[return-value]
 
 
 class CoordinatedExpert(ReviewAgentProtocol):
@@ -87,10 +87,10 @@ class CoordinatedExpert(ReviewAgentProtocol):
         *,
         mailbox: object | None = None,
         blackboard: object | None = None,
-    ) -> list[Finding]:
+    ) -> AgentSnapshot:
         self.mailbox = mailbox
         self.blackboard = blackboard
-        return [make_finding()]
+        return AgentSnapshot(agent_id="coordinated", findings=[make_finding()])
 
 
 class Verifier(VerifierProtocol):
@@ -142,7 +142,8 @@ async def test_runtime_returns_valid_structured_expert_and_verifier_outputs() ->
     runtime = AgentRuntime()
     context = make_context()
 
-    findings = await runtime.run_expert(Expert(), context)
+    snapshot = await runtime.run_expert(Expert(), context)
+    findings = snapshot.findings
     verdicts = await runtime.run_verifier(Verifier(), findings, [context])
 
     assert findings[0].id == "finding-auth"
@@ -153,7 +154,7 @@ async def test_runtime_returns_valid_structured_expert_and_verifier_outputs() ->
 async def test_runtime_rejects_invalid_structured_output() -> None:
     """运行时拒绝不符合 Finding Schema 的专家输出。"""
 
-    with pytest.raises(ValueError, match="Finding"):
+    with pytest.raises(ValueError, match="AgentSnapshot"):
         await AgentRuntime().run_expert(InvalidExpert(), make_context())
 
 

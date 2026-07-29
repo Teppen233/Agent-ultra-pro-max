@@ -1,5 +1,6 @@
 """缺陷与意图专家 Agent 的 Prompt 和协作契约测试。"""
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -7,9 +8,10 @@ import pytest
 from pydantic_ai.models.test import TestModel
 
 from reviewcrew.agents.base import AgentRuntime
-from reviewcrew.schemas import Budget, ContextPack, DiffHunk, TeamMessage
+from reviewcrew.schemas import AgentSnapshot, Budget, ContextPack, DiffHunk, TeamMessage
 from reviewcrew.team.blackboard import EvidenceBlackboard
 from reviewcrew.team.mailbox import Mailbox
+from reviewcrew.team.publisher import MessagePublisher
 
 
 def make_context(*, sample_rate: bool = False) -> ContextPack:
@@ -191,3 +193,79 @@ async def test_expert_responds_to_structured_handoff_and_evidence_request(tmp_pa
     response = blackboard.by_kind("evidence_response")[0]
     assert response.correlation_id == "finding-security"
     assert response.payload["conclusion"] == "supported"
+
+
+@pytest.mark.asyncio
+async def test_runtime_accepts_expert_snapshot_from_both_experts() -> None:
+    """公共 Runtime 必须直接消费两个专家的 AgentSnapshot。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+    from reviewcrew.agents.intent import IntentAgent
+
+    runtime = AgentRuntime()
+    defect = DefectAgent(model=make_model(category="security", line=10, title="SQL 拼接"), runtime=runtime)
+    intent = IntentAgent(model=make_model(category="logic", line=22, title="零值跳过"), runtime=runtime)
+
+    defect_snapshot = await runtime.run_expert(defect, make_context())
+    intent_snapshot = await runtime.run_expert(intent, make_context(sample_rate=True))
+
+    assert isinstance(defect_snapshot, AgentSnapshot)
+    assert defect_snapshot.findings[0].producer == "defect"
+    assert intent_snapshot.findings[0].producer == "intent"
+
+
+@pytest.mark.asyncio
+async def test_publisher_assigns_unique_sequences_under_concurrency(tmp_path) -> None:
+    """共享发布桥接必须原子地分配唯一序号。"""
+
+    mailbox = Mailbox(tmp_path, "run-sequence")
+    blackboard = EvidenceBlackboard("run-sequence")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+
+    await asyncio.gather(
+        *(
+            publisher.publish(sender=f"defect:ctx-{index}", recipient="*", kind="agent_completed", key=str(index), payload={})
+            for index in range(8)
+        )
+    )
+
+    assert [message.sequence for message in blackboard.messages] == list(range(1, 9))
+
+
+@pytest.mark.asyncio
+async def test_expert_rejects_candidate_without_intersecting_diff_evidence(tmp_path) -> None:
+    """候选定位正确但证据不来自修改行时不得发布。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    model = make_model(category="security", line=10, title="错误证据")
+    model.custom_output_args["findings"][0]["evidence"][0].update(
+        {"source": "read_file_range", "file": "other.py", "start_line": 1, "end_line": 1}
+    )
+    mailbox = Mailbox(tmp_path, "run-evidence")
+    blackboard = EvidenceBlackboard("run-evidence")
+
+    snapshot = await DefectAgent(model=model).run(make_context(), mailbox=mailbox, blackboard=blackboard)
+
+    assert snapshot.findings == []
+    assert blackboard.by_kind("candidate_finding") == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_expert_publishes_only_failed_terminal(tmp_path) -> None:
+    """取消在协作窗口内发生时必须发布一次失败终态并继续传播取消。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    mailbox = Mailbox(tmp_path, "run-cancel")
+    blackboard = EvidenceBlackboard("run-cancel")
+    task = asyncio.create_task(
+        DefectAgent(collaboration_window_seconds=1.0).run(make_context(), mailbox=mailbox, blackboard=blackboard)
+    )
+    await asyncio.sleep(0.02)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(blackboard.by_kind("agent_failed")) == 1
+    assert blackboard.by_kind("agent_completed") == []

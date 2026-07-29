@@ -18,7 +18,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 
 from reviewcrew.config import Config
 from reviewcrew.hooks import HookContext, HookManager
-from reviewcrew.schemas import Budget, ContextPack, Finding, Verdict
+from reviewcrew.schemas import AgentSnapshot, Budget, ContextPack, Finding, Verdict
 
 if TYPE_CHECKING:
     from reviewcrew.skills.registry import SkillDefinition
@@ -34,8 +34,8 @@ class ReviewAgentProtocol(Protocol):
         *,
         mailbox: object | None = None,
         blackboard: object | None = None,
-    ) -> list[Finding]:
-        """根据上下文返回候选问题。"""
+    ) -> AgentSnapshot:
+        """根据上下文返回可恢复的专家快照。"""
 
 
 @runtime_checkable
@@ -176,17 +176,15 @@ class AgentRuntime:
         *,
         mailbox: object | None = None,
         blackboard: object | None = None,
-    ) -> list[Finding]:
-        """执行专家并校验 Finding 列表。"""
+    ) -> AgentSnapshot:
+        """执行专家并校验 AgentSnapshot。"""
 
-        output = await self._run_with_validation(
-            agent.run,
-            (context,),
-            self._collaboration_arguments(agent.run, mailbox, blackboard),
-            Finding,
-            "专家",
-        )
-        return output
+        self._consume_request()
+        raw_output = await agent.run(context, **self._collaboration_arguments(agent.run, mailbox, blackboard))
+        try:
+            return raw_output if isinstance(raw_output, AgentSnapshot) else AgentSnapshot.model_validate(raw_output)
+        except ValidationError as error:
+            raise ValueError("专家输出不符合 AgentSnapshot 结构") from error
 
     async def run_verifier(
         self,

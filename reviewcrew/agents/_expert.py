@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -25,6 +26,7 @@ from reviewcrew.schemas import (
 from reviewcrew.skills.registry import SkillRegistry
 from reviewcrew.team.blackboard import EvidenceBlackboard
 from reviewcrew.team.mailbox import Mailbox
+from reviewcrew.team.publisher import MessagePublisher
 
 
 Role = Literal["defect", "intent"]
@@ -44,6 +46,8 @@ class ExpertAgent:
         config: Config | None = None,
         runtime: AgentRuntime | None = None,
         tools: Sequence[Any] = (),
+        publisher: MessagePublisher | None = None,
+        collaboration_window_seconds: float = 0.1,
     ) -> None:
         self.role = role
         self._model = model
@@ -51,6 +55,10 @@ class ExpertAgent:
         self._config = config or Config()
         self._runtime = runtime or AgentRuntime(config=self._config)
         self._tools = tuple(tools)
+        self._publisher = publisher
+        self._collaboration_window_seconds = collaboration_window_seconds
+        self._handled_handoffs: set[str] = set()
+        self._handled_evidence: set[str] = set()
 
     async def run(
         self,
@@ -65,26 +73,31 @@ class ExpertAgent:
 
         effective_budget = budget or Budget(seconds=plan.budget_seconds if plan is not None else 60)
         agent_id = f"{self.role}:{context.id}"
+        self._handled_handoffs.clear()
+        self._handled_evidence.clear()
+        publisher = self._publisher or (MessagePublisher(mailbox=mailbox, blackboard=blackboard) if mailbox is not None or blackboard is not None else None)
         try:
             snapshot = await self._review(context, agent_id, effective_budget)
             snapshot = self._normalize_snapshot(snapshot, context, agent_id)
-            await self._publish_findings(snapshot, context, mailbox, blackboard)
-            await self._respond_to_requests(snapshot, context, mailbox, blackboard)
+            await self._publish_findings(snapshot, context, publisher)
+            await self._respond_to_requests(snapshot, context, mailbox, blackboard, publisher)
+            await self._consume_collaboration_window(snapshot, context, mailbox, publisher)
             await self._publish(
                 context,
-                mailbox,
-                blackboard,
+                publisher,
                 kind="agent_completed",
                 recipient="*",
                 key="completed",
                 payload={"agent_id": agent_id, "role": self.role, "context_id": context.id},
             )
             return snapshot
+        except asyncio.CancelledError:
+            await asyncio.shield(self._publish(context, publisher, kind="agent_failed", recipient="*", key="failed", payload={"agent_id": agent_id, "role": self.role, "context_id": context.id, "warning": "专家已取消。"}))
+            raise
         except Exception:
             await self._publish(
                 context,
-                mailbox,
-                blackboard,
+                publisher,
                 kind="agent_failed",
                 recipient="*",
                 key="failed",
@@ -147,16 +160,14 @@ class ExpertAgent:
         self,
         snapshot: AgentSnapshot,
         context: ContextPack,
-        mailbox: Mailbox | None,
-        blackboard: EvidenceBlackboard | None,
+        publisher: MessagePublisher | None,
     ) -> None:
         """把每个已验证结构的候选交给 Verifier，而不发布模型原文。"""
 
         for finding in snapshot.findings:
             await self._publish(
                 context,
-                mailbox,
-                blackboard,
+                publisher,
                 kind="candidate_finding",
                 recipient="verifier",
                 key=f"candidate:{finding.id}",
@@ -170,23 +181,22 @@ class ExpertAgent:
         context: ContextPack,
         mailbox: Mailbox | None,
         blackboard: EvidenceBlackboard | None,
+        publisher: MessagePublisher | None,
     ) -> None:
         """处理至多两项结构化移交，并对定向补证请求给出结构化响应。"""
 
         if blackboard is None:
             return
         agent_id = snapshot.agent_id
-        handoffs = 0
-        for message in blackboard.messages:
-            if message.kind == "handoff_request" and handoffs < 2:
+        for message in tuple(blackboard.messages):
+            if message.kind == "handoff_request" and len(self._handled_handoffs) < 2 and message.id not in self._handled_handoffs:
                 request = HandoffRequest.model_validate(message.payload)
                 if request.target_agent != self.role:
                     continue
-                handoffs += 1
+                self._handled_handoffs.add(message.id)
                 await self._publish(
                     context,
-                    mailbox,
-                    blackboard,
+                    publisher,
                     kind="handoff_response",
                     recipient=request.source_agent,
                     key=f"handoff:{message.id}",
@@ -195,14 +205,20 @@ class ExpertAgent:
                         "role": self.role,
                         "context_id": context.id,
                         "hypothesis": request.hypothesis,
-                        "status": "received",
+                        "conclusion": "supported" if any(hunk.file == request.file for hunk in context.diff_hunks) else "uncertain",
+                        "evidence": [
+                            {"source": "diff", "file": hunk.file, "start_line": line, "end_line": line, "description": "定向检查命中的修改行。", "content": hunk.content}
+                            for hunk in context.diff_hunks if hunk.file == request.file
+                            for line in hunk.changed_lines if not request.lines or line in request.lines
+                        ],
                     },
                     correlation_id=message.correlation_id or message.id,
                 )
-            if message.kind == "verification_request":
+            if message.kind == "verification_request" and not self._handled_evidence:
                 request = VerificationRequest.model_validate(message.payload)
                 if request.target_agent != self.role:
                     continue
+                self._handled_evidence.add(message.id)
                 finding = next((item for item in snapshot.findings if item.id == request.finding_id), None)
                 response = EvidenceResponse(
                     finding_id=request.finding_id,
@@ -212,8 +228,7 @@ class ExpertAgent:
                 )
                 await self._publish(
                     context,
-                    mailbox,
-                    blackboard,
+                    publisher,
                     kind="evidence_response",
                     recipient="verifier",
                     key=f"evidence:{message.id}",
@@ -221,11 +236,28 @@ class ExpertAgent:
                     correlation_id=message.correlation_id or request.finding_id,
                 )
 
+    async def _consume_collaboration_window(self, snapshot: AgentSnapshot, context: ContextPack, mailbox: Mailbox | None, publisher: MessagePublisher | None) -> None:
+        """在明确且有界的窗口内处理候选发布后到达的定向请求。"""
+
+        if mailbox is None:
+            return
+        mailbox.register(snapshot.agent_id)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._collaboration_window_seconds
+        while loop.time() < deadline and (len(self._handled_handoffs) < 2 or not self._handled_evidence):
+            try:
+                message = await mailbox.receive_one(snapshot.agent_id, timeout=max(0.0, deadline - loop.time()))
+            except TimeoutError:
+                break
+            if message.kind not in {"handoff_request", "verification_request"}:
+                continue
+            board = EvidenceBlackboard(message.run_id, messages=[message])
+            await self._respond_to_requests(snapshot, context, mailbox, board, publisher)
+
     async def _publish(
         self,
         context: ContextPack,
-        mailbox: Mailbox | None,
-        blackboard: EvidenceBlackboard | None,
+        publisher: MessagePublisher | None,
         *,
         kind: Literal["candidate_finding", "handoff_response", "evidence_response", "agent_completed", "agent_failed"],
         recipient: str,
@@ -235,25 +267,9 @@ class ExpertAgent:
     ) -> None:
         """向可用协作设施提交同一条可序列化、安全摘要消息。"""
 
-        if mailbox is None and blackboard is None:
+        if publisher is None:
             return
-        run_id = blackboard.run_id if blackboard is not None else mailbox.run_id  # type: ignore[union-attr]
-        sequence = 1 if blackboard is None else max((item.sequence for item in blackboard.messages), default=0) + 1
-        message = TeamMessage(
-            id=f"{self.role}:{context.id}:{key}",
-            run_id=run_id,
-            sequence=sequence,
-            timestamp=datetime.now(UTC),
-            sender=f"{self.role}:{context.id}",
-            recipient=recipient,
-            kind=kind,
-            correlation_id=correlation_id,
-            payload=payload,
-        )
-        if blackboard is not None:
-            blackboard.apply(message)
-        if mailbox is not None:
-            await mailbox.publish(message)
+        await publisher.publish(sender=f"{self.role}:{context.id}", recipient=recipient, kind=kind, key=key, payload=payload, correlation_id=correlation_id)
 
     @staticmethod
     def _is_changed_finding(finding: Finding, context: ContextPack) -> bool:
@@ -263,6 +279,10 @@ class ExpertAgent:
             hunk.file == finding.file
             and any(finding.line_start <= line <= finding.line_end for line in hunk.changed_lines)
             for hunk in context.diff_hunks
+        ) and any(
+            evidence.source == "diff" and evidence.file == finding.file
+            and any(evidence.start_line <= line <= evidence.end_line for hunk in context.diff_hunks if hunk.file == evidence.file for line in hunk.changed_lines)
+            for evidence in finding.evidence
         )
 
     @staticmethod
