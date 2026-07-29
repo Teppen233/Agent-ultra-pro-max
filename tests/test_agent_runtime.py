@@ -336,6 +336,55 @@ async def test_shared_budget_reserves_request_before_parallel_model_call(tmp_pat
     assert budget.requests_used == 1
 
 
+@pytest.mark.asyncio
+async def test_agent_constructor_failure_releases_reservation_for_next_call(tmp_path, monkeypatch) -> None:
+    """Agent 初始化异常未发出请求时，必须释放全部预留额度。"""
+
+    import reviewcrew.agents.base as agent_base
+
+    shared = tmp_path / "shared.md"
+    role_prompt = tmp_path / "role.md"
+    shared.write_text("共享规则", encoding="utf-8")
+    role_prompt.write_text("角色提示", encoding="utf-8")
+    sources = [PromptSource("shared", shared), PromptSource("role", role_prompt)]
+    budget = Budget(seconds=60, max_requests=1)
+    runtime = AgentRuntime(config=Config(llm_max_retries=0))
+    original_agent = agent_base.Agent
+
+    def fail_agent_construction(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise ValueError("测试 Agent 构造失败")
+
+    monkeypatch.setattr(agent_base, "Agent", fail_agent_construction)
+    with pytest.raises(ValueError, match="构造失败"):
+        await runtime.run_structured(
+            TestModel(custom_output_args={"summary": "不会执行", "budget_seconds": 1}),
+            role="verifier",
+            sources=sources,
+            skills=[],
+            dynamic_context="构造失败路径",
+            budget=budget,
+            output_type=ReviewPlan,
+        )
+
+    assert budget.requests_used == 0
+    assert runtime.request_count == 0
+
+    monkeypatch.setattr(agent_base, "Agent", original_agent)
+    result = await runtime.run_structured(
+        TestModel(custom_output_args={"summary": "后续可用", "budget_seconds": 1}),
+        role="verifier",
+        sources=sources,
+        skills=[],
+        dynamic_context="恢复后的调用",
+        budget=budget,
+        output_type=ReviewPlan,
+    )
+
+    assert result.summary == "后续可用"
+    assert budget.requests_used == 1
+    assert runtime.request_count == 1
+
+
 def test_budget_is_a_shared_schema_contract() -> None:
     """预算模型位于公共 Schema，供后续编排阶段复用。"""
 
