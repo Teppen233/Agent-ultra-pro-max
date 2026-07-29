@@ -30,6 +30,7 @@ from reviewcrew.team.publisher import MessagePublisher
 
 
 Role = Literal["defect", "intent"]
+_MAX_COLLABORATION_SECONDS = 0.25
 
 
 class ExpertAgent:
@@ -72,6 +73,7 @@ class ExpertAgent:
         """运行单个上下文分片，并发布候选、补证和终态消息。"""
 
         effective_budget = budget or Budget(seconds=plan.budget_seconds if plan is not None else 60)
+        deadline = asyncio.get_running_loop().time() + effective_budget.seconds
         agent_id = f"{self.role}:{context.id}"
         self._handled_handoffs.clear()
         self._handled_evidence.clear()
@@ -81,7 +83,7 @@ class ExpertAgent:
             snapshot = self._normalize_snapshot(snapshot, context, agent_id)
             await self._publish_findings(snapshot, context, publisher)
             await self._respond_to_requests(snapshot, context, mailbox, blackboard, publisher)
-            await self._consume_collaboration_window(snapshot, context, mailbox, publisher, effective_budget)
+            await self._consume_collaboration_window(snapshot, context, mailbox, publisher, deadline)
             await self._publish(
                 context,
                 publisher,
@@ -194,6 +196,12 @@ class ExpertAgent:
                 if request.target_agent != self.role:
                     continue
                 self._handled_handoffs.add(message.id)
+                evidence = [
+                    {"source": "diff", "file": hunk.file, "start_line": line, "end_line": line, "description": "定向检查命中的修改行。", "content": hunk.content}
+                    for hunk in context.diff_hunks if hunk.file == request.file
+                    for line in hunk.changed_lines if line in request.lines
+                ]
+                conclusion = "supported" if evidence and request.requested_check.strip() else "insufficient"
                 await self._publish(
                     context,
                     publisher,
@@ -205,12 +213,9 @@ class ExpertAgent:
                         "role": self.role,
                         "context_id": context.id,
                         "hypothesis": request.hypothesis,
-                        "conclusion": "supported" if any(hunk.file == request.file for hunk in context.diff_hunks) else "uncertain",
-                        "evidence": [
-                            {"source": "diff", "file": hunk.file, "start_line": line, "end_line": line, "description": "定向检查命中的修改行。", "content": hunk.content}
-                            for hunk in context.diff_hunks if hunk.file == request.file
-                            for line in hunk.changed_lines if not request.lines or line in request.lines
-                        ],
+                        "requested_check": request.requested_check,
+                        "conclusion": conclusion,
+                        "evidence": evidence,
                     },
                     correlation_id=message.correlation_id or message.id,
                 )
@@ -236,14 +241,15 @@ class ExpertAgent:
                     correlation_id=message.correlation_id or request.finding_id,
                 )
 
-    async def _consume_collaboration_window(self, snapshot: AgentSnapshot, context: ContextPack, mailbox: Mailbox | None, publisher: MessagePublisher | None, budget: Budget) -> None:
+    async def _consume_collaboration_window(self, snapshot: AgentSnapshot, context: ContextPack, mailbox: Mailbox | None, publisher: MessagePublisher | None, deadline: float) -> None:
         """在明确且有界的窗口内处理候选发布后到达的定向请求。"""
 
         if mailbox is None:
             return
         mailbox.register(snapshot.agent_id)
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + (self._collaboration_window_seconds if self._collaboration_window_seconds is not None else budget.seconds)
+        window = self._collaboration_window_seconds if self._collaboration_window_seconds is not None else _MAX_COLLABORATION_SECONDS
+        deadline = min(deadline, loop.time() + window)
         while loop.time() < deadline and (len(self._handled_handoffs) < 2 or not self._handled_evidence):
             try:
                 message = await mailbox.receive_one(snapshot.agent_id, timeout=max(0.0, deadline - loop.time()))
