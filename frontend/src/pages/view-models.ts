@@ -1,4 +1,4 @@
-import type { BenchmarkSummary } from '@/contracts'
+import type { BenchmarkSummary, ReviewResult } from '@/contracts'
 
 export interface BenchmarkPresentation {
   kind: 'real' | 'offline' | 'unavailable'
@@ -9,6 +9,16 @@ export interface BenchmarkPresentation {
   rateLabel: string
   elapsed: string
   note: string
+}
+
+export interface ResultStatusPresentation {
+  tone: 'success' | 'warning' | 'danger'
+  eyebrow: string
+  summaryLead: string
+  summaryUnit: string
+  findingNote: string
+  rejectedPrefix: string
+  elapsedNote: string
 }
 
 const percent = (value: number): string => `${(value * 100).toFixed(1)}%`
@@ -44,6 +54,30 @@ export const presentBenchmark = (summary: BenchmarkSummary | null): BenchmarkPre
 /** Demo 不请求后端；真实运行只在尚未水合时获取最终 JSON。 */
 export const shouldFetchFinalResult = (input: { isDemo: boolean; resultHydrated: boolean }): boolean =>
   !input.isDemo && !input.resultHydrated
+
+/** 终态文案必须反映服务端真实状态，部分/失败结果不宣称完整独立验证。 */
+export const presentResultStatus = (
+  status: ReviewResult['status'],
+  isDemo: boolean,
+): ResultStatusPresentation => {
+  const elapsedNote = isDemo ? '离线演示耗时' : '服务端实际结果'
+  if (status === 'partial') {
+    return {
+      tone: 'warning', eyebrow: '审查部分完成', summaryLead: '审查部分完成，当前保留',
+      summaryUnit: '个可用问题', findingNote: '部分结果，需人工复核', rejectedPrefix: '部分流程已记录', elapsedNote,
+    }
+  }
+  if (status === 'failed') {
+    return {
+      tone: 'danger', eyebrow: '审查失败', summaryLead: '审查未完成，当前保留',
+      summaryUnit: '个可用问题', findingNote: '失败前保留结果', rejectedPrefix: '失败前已记录', elapsedNote,
+    }
+  }
+  return {
+    tone: 'success', eyebrow: '审查完成', summaryLead: '审查已收敛，发现',
+    summaryUnit: '个有效问题', findingNote: '经独立验证', rejectedPrefix: '独立验证者拒绝', elapsedNote,
+  }
+}
 
 interface ResultMetricInput {
   isDemo: boolean

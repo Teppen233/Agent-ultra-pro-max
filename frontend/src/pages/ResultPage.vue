@@ -4,7 +4,8 @@ import { useRoute } from 'vue-router'
 
 import { pollReviewResult, reportUrl } from '@/api/client'
 import FindingCard from '@/components/FindingCard.vue'
-import { presentResultMetrics, shouldFetchFinalResult } from '@/pages/view-models'
+import type { ReviewResult } from '@/contracts'
+import { presentResultMetrics, presentResultStatus, shouldFetchFinalResult } from '@/pages/view-models'
 import { useReviewStore } from '@/stores/review'
 
 const route = useRoute()
@@ -12,7 +13,7 @@ const store = useReviewStore()
 const severity = ref('all')
 const category = ref('all')
 const error = ref('')
-const loadState = ref<'loading' | 'pending' | 'ready' | 'error'>('loading')
+const loadState = ref<'loading' | 'pending' | 'ready' | 'failed' | 'error'>('loading')
 const pendingText = ref('正在获取最终审查报告…')
 const controller = new AbortController()
 const runId = computed(() => String(route.params.runId))
@@ -25,6 +26,11 @@ const criticalCount = computed(() => store.findings.filter((finding) => finding.
 const rejectedCount = computed(() => isDemo.value
   ? store.candidates.filter((item) => item.verdict === 'rejected').length
   : store.rejectedCount)
+const terminalStatus = computed<ReviewResult['status']>(() => {
+  if (store.status === 'partial' || store.status === 'failed') return store.status
+  return 'completed'
+})
+const statusView = computed(() => presentResultStatus(terminalStatus.value, isDemo.value))
 const metrics = computed(() => presentResultMetrics({
   isDemo: isDemo.value,
   resultHydrated: store.resultHydrated,
@@ -57,6 +63,8 @@ onMounted(async () => {
     if (response.kind === 'result') {
       store.hydrateResult(response.result)
       loadState.value = 'ready'
+    } else if (response.kind === 'failed') {
+      loadState.value = 'failed'
     }
   } catch (cause) {
     if (controller.signal.aborted) return
@@ -72,21 +80,22 @@ onBeforeUnmount(() => controller.abort())
   <div class="result-page page-width">
     <section v-if="loadState !== 'ready'" class="result-loading panel" role="status" aria-live="polite">
       <span class="scan-orbit"><i /><i /><i /></span>
-      <div v-if="loadState !== 'error'"><span class="eyebrow">最终报告</span><h1>{{ pendingText }}</h1><p>运行中状态不会被当作完整报告，页面会在终态结果生成后自动更新。</p></div>
+      <div v-if="loadState === 'loading' || loadState === 'pending'"><span class="eyebrow">最终报告</span><h1>{{ pendingText }}</h1><p>运行中状态不会被当作完整报告，页面会在终态结果生成后自动更新。</p></div>
+      <div v-else-if="loadState === 'failed'"><span class="eyebrow">审查失败</span><h1>审查已失败，未生成完整报告</h1><p>服务端仅返回失败状态，没有可安全展示的完整结果。</p></div>
       <div v-else><span class="eyebrow">报告获取失败</span><h1>暂时无法加载最终报告</h1><p class="form-error">{{ error }}</p></div>
     </section>
 
     <template v-else>
-      <section class="result-hero panel">
-        <div class="result-icon"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /><circle cx="12" cy="12" r="10" /></svg></div>
-        <div><span class="eyebrow">审查完成</span><h1>审查已收敛，发现 <em>{{ store.findings.length }}</em> 个有效问题</h1><p>{{ store.repository || runId }} · 独立验证者拒绝 {{ rejectedCount }} 个误报候选 <b v-if="metrics.demoLabel">· {{ metrics.demoLabel }}</b></p></div>
+      <section class="result-hero panel" :class="statusView.tone">
+        <div class="result-icon" :class="statusView.tone"><svg viewBox="0 0 24 24"><template v-if="statusView.tone === 'success'"><path d="m5 12 4 4L19 6" /><circle cx="12" cy="12" r="10" /></template><path v-else-if="statusView.tone === 'warning'" d="M12 3 2 21h20L12 3Zm0 6v5m0 3h.01" /><template v-else><path d="m8 8 8 8m0-8-8 8" /><circle cx="12" cy="12" r="10" /></template></svg></div>
+        <div><span class="eyebrow">{{ statusView.eyebrow }}</span><h1>{{ statusView.summaryLead }} <em>{{ store.findings.length }}</em> {{ statusView.summaryUnit }}</h1><p>{{ store.repository || runId }} · {{ statusView.rejectedPrefix }} {{ rejectedCount }} 个拒绝候选 <b v-if="metrics.demoLabel">· {{ metrics.demoLabel }}</b></p></div>
         <div class="result-actions"><a v-if="!isDemo" class="secondary-button" :href="reportUrl(runId)" target="_blank">查看 Markdown</a><RouterLink class="primary-button compact-button" to="/"><span>新建审查</span><b>＋</b></RouterLink></div>
       </section>
       <section class="metric-grid">
-        <article><small>最终问题</small><strong>{{ store.findings.length }}</strong><span>经独立验证</span></article>
+        <article><small>最终问题</small><strong>{{ store.findings.length }}</strong><span>{{ statusView.findingNote }}</span></article>
         <article class="danger"><small>严重问题</small><strong>{{ criticalCount }}</strong><span>建议立即修复</span></article>
         <article><small>覆盖文件</small><strong>{{ metrics.coverageCount }}</strong><span>Diff 相关范围</span></article>
-        <article><small>运行耗时</small><strong>{{ metrics.elapsed }}</strong><span>服务端实际结果</span></article>
+        <article><small>运行耗时</small><strong>{{ metrics.elapsed }}</strong><span>{{ statusView.elapsedNote }}</span></article>
       </section>
       <section class="report-layout">
         <div>

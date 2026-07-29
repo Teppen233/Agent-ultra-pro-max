@@ -122,8 +122,15 @@ export interface ReviewPendingResponse {
   status: string
 }
 
+export interface ReviewFailedResponse {
+  kind: 'failed'
+  run_id: string
+  status: 'failed'
+}
+
 export type ReviewResponse =
   | ReviewPendingResponse
+  | ReviewFailedResponse
   | { kind: 'result'; result: ReviewResult }
 
 export interface RunSummary {

@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { PipelineEvent } from '@/contracts'
 import {
   createEventSubscription,
+  fetchLatestBenchmark,
   fetchReview,
   parseEventLog,
   pollReviewResult,
@@ -20,6 +21,8 @@ const publicEvent: PipelineEvent = {
 }
 
 describe('API Client', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
   it('按公开契约提交审查请求并解析运行标识', async () => {
     const fetcher = vi.fn(async () => new Response(
       JSON.stringify({ run_id: 'run-123', status: 'running' }),
@@ -99,6 +102,27 @@ describe('API Client', () => {
     const response = await fetchReview('run-123', runningFetcher)
 
     expect(response).toEqual({ kind: 'pending', run_id: 'run-123', status: 'running' })
+  })
+
+  it('将仅含状态的失败响应建模为失败，而不是不完整结果错误', async () => {
+    const failedFetcher = vi.fn(async () => new Response(
+      JSON.stringify({ run_id: 'run-123', status: 'failed' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ))
+
+    await expect(fetchReview('run-123', failedFetcher)).resolves.toEqual({
+      kind: 'failed', run_id: 'run-123', status: 'failed',
+    })
+  })
+
+  it('拒绝字段缺失或类型错误的 Benchmark 摘要', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      mode: 'quick', runner: 'real', offline: false, selected_cases: 5,
+      completed_cases: 5, caught_cases: 3, real_catch_rate: 0.6,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetcher)
+
+    await expect(fetchLatestBenchmark()).rejects.toThrow('评测摘要格式无效。')
   })
 
   it('轮询运行中状态，只有完整终态才返回 ReviewResult', async () => {

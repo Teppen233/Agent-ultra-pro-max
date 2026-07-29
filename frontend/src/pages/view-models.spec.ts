@@ -4,6 +4,7 @@ import type { BenchmarkSummary } from '@/contracts'
 import {
   presentBenchmark,
   presentResultMetrics,
+  presentResultStatus,
   shouldFetchFinalResult,
 } from '@/pages/view-models'
 
@@ -54,5 +55,19 @@ describe('页面展示模型', () => {
       isDemo: true, resultHydrated: false, coverage: [], elapsedSeconds: 0,
       demo: { coverage: ['src/demo.ts'], elapsedSeconds: 6 },
     })).toEqual({ coverageCount: '1', elapsed: '6s', coverage: ['src/demo.ts'], demoLabel: '演示数据' })
+  })
+
+  it('按 completed、partial、failed 区分结果语义，Demo 使用离线耗时文案', () => {
+    expect(presentResultStatus('completed', false)).toMatchObject({
+      tone: 'success', eyebrow: '审查完成', findingNote: '经独立验证', elapsedNote: '服务端实际结果',
+    })
+    expect(presentResultStatus('partial', false)).toMatchObject({
+      tone: 'warning', eyebrow: '审查部分完成', findingNote: '部分结果，需人工复核',
+    })
+    expect(presentResultStatus('partial', false).findingNote).not.toContain('独立验证')
+    expect(presentResultStatus('failed', false)).toMatchObject({
+      tone: 'danger', eyebrow: '审查失败', findingNote: '失败前保留结果',
+    })
+    expect(presentResultStatus('completed', true).elapsedNote).toBe('离线演示耗时')
   })
 })

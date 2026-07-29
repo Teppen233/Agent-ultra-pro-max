@@ -121,22 +121,51 @@ const asReviewResponse = (value: unknown): ReviewResponse => {
     throw new Error('运行状态格式无效。')
   }
   const terminal = ['completed', 'partial', 'failed'].includes(payload.status)
+  const completeResult = (
+    typeof payload.repository === 'string'
+    && typeof payload.base_sha === 'string'
+    && typeof payload.head_sha === 'string'
+    && Array.isArray(payload.findings)
+    && typeof payload.rejected_count === 'number'
+    && Array.isArray(payload.coverage)
+    && Array.isArray(payload.warnings)
+    && typeof payload.started_at === 'string'
+    && typeof payload.completed_at === 'string'
+    && typeof payload.elapsed_seconds === 'number'
+  )
+  if (terminal && completeResult) return { kind: 'result', result: payload as unknown as ReviewResult }
+  if (payload.status === 'failed') return { kind: 'failed', run_id: payload.run_id, status: 'failed' }
   if (!terminal) return { kind: 'pending', run_id: payload.run_id, status: payload.status }
+  throw new Error('最终审查结果尚未完整生成。')
+}
+
+const asBenchmarkSummary = (value: unknown): BenchmarkSummary => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('评测摘要格式无效。')
+  const payload = value as Record<string, unknown>
+  const integerFields = [
+    'selected_cases', 'completed_cases', 'actually_run_ready_cases', 'caught_cases',
+    'false_positive_count', 'verifier_accepted_count', 'verifier_rejected_count',
+    'needs_human_review_cases', 'timed_out_cases',
+  ]
+  const validIntegerFields = integerFields.every((field) =>
+    typeof payload[field] === 'number' && Number.isInteger(payload[field]) && (payload[field] as number) >= 0)
+  const validRate = (rate: unknown): boolean =>
+    rate === null || (typeof rate === 'number' && Number.isFinite(rate) && rate >= 0 && rate <= 1)
   if (
-    typeof payload.repository !== 'string'
-    || typeof payload.base_sha !== 'string'
-    || typeof payload.head_sha !== 'string'
-    || !Array.isArray(payload.findings)
-    || typeof payload.rejected_count !== 'number'
-    || !Array.isArray(payload.coverage)
-    || !Array.isArray(payload.warnings)
-    || typeof payload.started_at !== 'string'
-    || typeof payload.completed_at !== 'string'
+    !['quick', 'case', 'full'].includes(String(payload.mode))
+    || !['fake', 'real'].includes(String(payload.runner))
+    || typeof payload.offline !== 'boolean'
+    || !validIntegerFields
+    || !validRate(payload.real_catch_rate)
+    || !validRate(payload.observed_offline_catch_rate)
+    || typeof payload.offline_results_excluded_from_real_rate !== 'boolean'
     || typeof payload.elapsed_seconds !== 'number'
+    || !Number.isFinite(payload.elapsed_seconds)
+    || payload.elapsed_seconds < 0
   ) {
-    throw new Error('最终审查结果尚未完整生成。')
+    throw new Error('评测摘要格式无效。')
   }
-  return { kind: 'result', result: payload as unknown as ReviewResult }
+  return payload as unknown as BenchmarkSummary
 }
 
 /** 获取一次运行的可辨识状态或完整最终结果。 */
@@ -149,7 +178,7 @@ export const pollReviewResult = async (runId: string, options: PollOptions = {})
   while (!options.signal?.aborted) {
     const response = await fetchReview(runId, options.fetcher)
     if (options.signal?.aborted) break
-    if (response.kind === 'result') return response
+    if (response.kind !== 'pending') return response
     options.onPending?.(response)
     await wait(options.intervalMs ?? 1000)
   }
@@ -161,8 +190,8 @@ export const fetchRuns = (limit = 50, offset = 0): Promise<RunsResponse> =>
   requestJson(`/api/runs?limit=${limit}&offset=${offset}`)
 
 /** 获取最近一次真实 Benchmark 摘要。 */
-export const fetchLatestBenchmark = (): Promise<BenchmarkSummary> =>
-  requestJson('/api/benchmarks/latest')
+export const fetchLatestBenchmark = async (): Promise<BenchmarkSummary> =>
+  asBenchmarkSummary(await requestJson<unknown>('/api/benchmarks/latest'))
 
 /** 返回后端 Markdown 报告地址，供查看或下载。 */
 export const reportUrl = (runId: string): string =>
