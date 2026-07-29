@@ -1,0 +1,27 @@
+diff --git a/src/app.py b/src/app.py
+index 1111111..2222222 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -10,3 +10,4 @@ def run():
+     value = load()
+-    return value
++    checked = validate(value)
++    return checked
+diff --git a/old_name.py b/new_name.py
+similarity index 90%
+rename from old_name.py
+rename to new_name.py
+--- a/old_name.py
++++ b/new_name.py
+@@ -1,2 +1,2 @@
+-OLD = True
++NEW = True
+ context = 1
+diff --git a/src/new.py b/src/new.py
+new file mode 100644
+--- /dev/null
++++ b/src/new.py
+@@ -0,0 +1,2 @@
++ENABLED = True
++VALUE = 1
+

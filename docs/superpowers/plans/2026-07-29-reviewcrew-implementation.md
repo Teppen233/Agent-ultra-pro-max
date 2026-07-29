@@ -288,11 +288,11 @@ git commit -m "feat: 实现审查事件与 Agent Mailbox"
 - Produces: `parse_unified_diff(raw_diff: str) -> list[ChangedFile]`
 - Produces: `changed_line_set(files: list[ChangedFile]) -> dict[str, set[int]]`
 
-- [ ] **Step 1: 创建包含新增、删除、重命名和多 hunk 的 fixture**
+- [x] **Step 1: 创建包含新增、删除、重命名和多 hunk 的 fixture**
 
 Fixture 必须包含新增行 `+`, 删除行 `-`、上下文行、`/dev/null` 和 rename header。
 
-- [ ] **Step 2: 写解析失败测试**
+- [x] **Step 2: 写解析失败测试**
 
 ```python
 def test_parse_diff_tracks_only_new_changed_lines(sample_diff):
@@ -305,19 +305,19 @@ def test_parse_diff_supports_renamed_file(sample_diff):
     assert renamed.old_path is not None
 ```
 
-- [ ] **Step 3: 运行测试并确认失败**
+- [x] **Step 3: 运行测试并确认失败**
 
 Run: `pytest tests/test_diff_parser.py -v`
 
-- [ ] **Step 4: 实现逐行状态机解析器**
+- [x] **Step 4: 实现逐行状态机解析器**
 
 不得依赖 GitHub 特定 HTML。过滤二进制文件；lockfile 和生成文件只记录为 skipped warning，不交给 Agent。
 
-- [ ] **Step 5: 运行测试并确认通过**
+- [x] **Step 5: 运行测试并确认通过**
 
 Run: `pytest tests/test_diff_parser.py -v`
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add reviewcrew/diff tests/fixtures/sample.diff tests/test_diff_parser.py
@@ -336,7 +336,7 @@ git commit -m "feat: 解析拉取请求差异与修改行"
 - Produces: `async load_pr(request: ReviewRequest, config: Config) -> PRData`
 - Uses: GitHub REST `GET /repos/{owner}/{repo}/pulls/{number}` with diff media type.
 
-- [ ] **Step 1: 写 GitHub URL 解析和 HTTP Mock 测试**
+- [x] **Step 1: 写 GitHub URL 解析和 HTTP Mock 测试**
 
 ```python
 @pytest.mark.asyncio
@@ -348,23 +348,23 @@ async def test_load_github_pr_returns_pr_data(respx_mock):
     assert result.head_sha == "head123"
 ```
 
-- [ ] **Step 2: 写本地仓库错误测试**
+- [x] **Step 2: 写本地仓库错误测试**
 
 验证路径不存在、ref 不存在和 diff 命令失败时返回中文可操作错误。
 
-- [ ] **Step 3: 运行测试并确认失败**
+- [x] **Step 3: 运行测试并确认失败**
 
 Run: `pytest tests/test_pr_loader.py -v`
 
-- [ ] **Step 4: 实现 GitHub 和本地两种 Loader**
+- [x] **Step 4: 实现 GitHub 和本地两种 Loader**
 
 GitHub Token 可选；不得记录 Token。本地模式使用参数化的 `git diff $baseRef...$headRef` 获取 diff，`$baseRef` 和 `$headRef` 必须先通过 `git rev-parse --verify` 校验，命令工作目录必须固定为指定仓库路径。
 
-- [ ] **Step 5: 运行测试并确认通过**
+- [x] **Step 5: 运行测试并确认通过**
 
 Run: `pytest tests/test_pr_loader.py -v`
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add reviewcrew/github tests/test_pr_loader.py
@@ -396,7 +396,7 @@ git commit -m "feat: 加载 GitHub 与本地拉取请求"
 - Produces: `ToolRegistry.invoke(role: str, name: str, arguments: dict[str, Any], budget: Budget) -> Any`
 - Produces: `async build_context(pr: PRData, repo: Path, config: Config) -> list[ContextPack]`
 
-- [ ] **Step 1: 写路径穿越和范围读取失败测试**
+- [x] **Step 1: 写路径穿越和范围读取失败测试**
 
 ```python
 def test_safe_read_rejects_path_escape(tmp_path):
@@ -404,27 +404,27 @@ def test_safe_read_rejects_path_escape(tmp_path):
         safe_read(tmp_path, "../secret.txt", 1, 10)
 ```
 
-- [ ] **Step 2: 写 Context 构建测试**
+- [x] **Step 2: 写 Context 构建测试**
 
 断言修改函数周边代码、同名测试、README 片段和检索说明进入 ContextPack；超预算时 `truncated=True`。
 
-- [ ] **Step 3: 运行测试并确认失败**
+- [x] **Step 3: 运行测试并确认失败**
 
 Run: `pytest tests/test_tools.py tests/test_context_builder.py -v`
 
-- [ ] **Step 4: 实现只读工具**
+- [x] **Step 4: 实现只读工具**
 
 优先使用 `rg`，不可用时使用 Python 受限文本搜索。所有返回限制条数和字符数。Semgrep 不存在或超时返回空列表并写中文 warning。ToolRegistry 在调用前检查角色、仓库路径、剩余预算和参数 Schema，在调用后裁剪输出并触发 Hooks。
 
-- [ ] **Step 5: 实现 Context Builder**
+- [x] **Step 5: 实现 Context Builder**
 
 按同目录和修改符号聚类 hunk。顺序优先级：diff、完整函数、直接相关代码、测试、项目文档、Git 历史、静态信号。默认单 Pack 字符预算配置化。
 
-- [ ] **Step 6: 运行测试并确认通过**
+- [x] **Step 6: 运行测试并确认通过**
 
 Run: `pytest tests/test_tools.py tests/test_context_builder.py -v`
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```powershell
 git add reviewcrew/tools reviewcrew/context tests/test_tools.py tests/test_context_builder.py
