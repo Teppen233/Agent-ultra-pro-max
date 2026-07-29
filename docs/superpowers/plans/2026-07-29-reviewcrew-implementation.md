@@ -581,27 +581,27 @@ git commit -m "feat: 实现缺陷与意图审查 Agent"
 - Produces: `deduplicate_findings(findings: list[Finding]) -> list[Finding]`
 - Produces: `VerifierAgent.watch(mailbox: Mailbox, blackboard: EvidenceBlackboard, budget: Budget) -> list[Verdict]`
 
-- [ ] **Step 1: 写确定性去重测试**
+- [x] **Step 1: 写确定性去重测试**
 
 同文件重叠行且同类别合并；不同触发机制不得误合并；合并结果保留更高置信度和全部去重证据。
 
-- [ ] **Step 2: 写 Verifier Fake Model 测试**
+- [x] **Step 2: 写 Verifier Fake Model 测试**
 
 一条存在上游校验的候选应拒绝为 `false_positive`；一条真实可达候选应接受为 `confirmed`。
 
-- [ ] **Step 3: 运行测试并确认失败**
+- [x] **Step 3: 运行测试并确认失败**
 
 Run: `pytest tests/test_dedupe.py tests/test_verifier.py -v`
 
-- [ ] **Step 4: 实现去重和 Verifier**
+- [x] **Step 4: 实现去重和 Verifier**
 
 Verifier watcher 与专家同时启动，候选到达后立即验证。Verifier 使用干净上下文，只接收候选结论、代码证据和必要上下文；每个 Finding 最多发送一次 30 秒定向补证请求。默认拒绝低于 0.6 的最终置信度，最终最多保留 8 条。
 
-- [ ] **Step 5: 运行测试并确认通过**
+- [x] **Step 5: 运行测试并确认通过**
 
 Run: `pytest tests/test_dedupe.py tests/test_verifier.py -v`
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add reviewcrew/pipeline/dedupe.py reviewcrew/agents/verifier.py reviewcrew/agents/prompts/verifier.md tests/test_dedupe.py tests/test_verifier.py
@@ -623,27 +623,27 @@ git commit -m "feat: 验证并去重候选问题"
 - Produces: `render_markdown(result: ReviewResult) -> str`
 - Produces: CLI `python -m reviewcrew.cli review ...`
 
-- [ ] **Step 1: 写 Fake 端到端状态机测试**
+- [x] **Step 1: 写 Fake 端到端状态机测试**
 
 断言 TeamLead 先产生 ReviewPlan，两个专家、Verifier watcher、静态工具通过 `asyncio.TaskGroup` 并行；Verifier 在第一个候选到达后立即开始，不等待专家完成；报告事件最后发出。
 
-- [ ] **Step 2: 写降级测试**
+- [x] **Step 2: 写降级测试**
 
 覆盖一个专家异常、Verifier 异常、阶段超时和全局超时；断言状态为 `partial` 且中文 warning 可见。
 
-- [ ] **Step 3: 写报告测试**
+- [x] **Step 3: 写报告测试**
 
 Markdown 必须包含严重度、类别、文件行号、触发条件、影响、证据、建议、Verifier 状态和总耗时。
 
-- [ ] **Step 4: 运行测试并确认失败**
+- [x] **Step 4: 运行测试并确认失败**
 
 Run: `pytest tests/test_orchestrator.py tests/test_report.py tests/test_cli.py -v`
 
-- [ ] **Step 5: 实现 Orchestrator 和报告**
+- [x] **Step 5: 实现 Orchestrator 和报告**
 
 阶段预算使用 `asyncio.timeout`。每个阶段发 `stage.started/completed/failed`。Orchestrator 驱动 Mailbox、Blackboard、Hooks 和 TaskGroup；收到 budget warning 时要求 Agent 提交 snapshot。所有结果写入 `runs/{run_id}/result.json` 和 `runs/{run_id}/report.md`。
 
-- [ ] **Step 6: 实现 CLI**
+- [x] **Step 6: 实现 CLI**
 
 ```text
 python -m reviewcrew.cli review --pr https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1
@@ -651,11 +651,11 @@ python -m reviewcrew.cli review --repo $env:REVIEWCREW_SMOKE_REPO --base $env:RE
 python -m reviewcrew.cli replay --run-id $env:REVIEWCREW_REPLAY_RUN_ID
 ```
 
-- [ ] **Step 7: 运行测试并确认通过**
+- [x] **Step 7: 运行测试并确认通过**
 
 Run: `pytest tests/test_orchestrator.py tests/test_report.py tests/test_cli.py -v`
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```powershell
 git add reviewcrew/pipeline reviewcrew/cli.py tests/test_orchestrator.py tests/test_report.py tests/test_cli.py
@@ -679,27 +679,27 @@ git commit -m "feat: 编排审查流程并生成报告"
 - Produces: `GET /api/replays/{run_id}/events?speed=2`
 - Produces: `GET /api/benchmarks/latest`
 
-- [ ] **Step 1: 写 API 和 SSE 测试**
+- [x] **Step 1: 写 API 和 SSE 测试**
 
 使用 FastAPI TestClient 验证启动响应、404 中文错误、SSE `data:` 格式、完成事件后流结束。
 
-- [ ] **Step 2: 写 Replay 时序测试**
+- [x] **Step 2: 写 Replay 时序测试**
 
 给定三条带时间戳事件，`speed=2` 应保持顺序并缩短间隔；测试中注入虚拟时钟，禁止真实 sleep。
 
-- [ ] **Step 3: 运行测试并确认失败**
+- [x] **Step 3: 运行测试并确认失败**
 
 Run: `pytest tests/test_server.py -v`
 
-- [ ] **Step 4: 实现后台审查任务、SSE 和 Replay**
+- [x] **Step 4: 实现后台审查任务、SSE 和 Replay**
 
 接口返回错误使用中文 `detail`。后台任务失败必须发 `review.failed`，不得让 SSE 永久悬挂。
 
-- [ ] **Step 5: 运行测试并确认通过**
+- [x] **Step 5: 运行测试并确认通过**
 
 Run: `pytest tests/test_server.py -v`
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add reviewcrew/server tests/test_server.py
