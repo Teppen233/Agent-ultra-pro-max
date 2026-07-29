@@ -116,6 +116,36 @@ def test_backend_factory_exposes_fake_and_real_interfaces() -> None:
     assert (real.name, real.offline) == ("real", False)
 
 
+def test_real_runner_uses_test_pr_with_default_orchestrator_adapter() -> None:
+    """真实 Runner 无需额外注入 executor，也能把 ready 测试 PR 交给 Orchestrator。"""
+
+    _, runner = benchmark_modules()
+    source = load_fake_entries()[0]
+    entry = source.model_copy(
+        update={
+            "source_kind": "public_case",
+            "test_pr": "https://github.com/example/reviewcrew-benchmark/pull/1",
+        }
+    )
+    expected = runner.FakeReviewRunner().run(source)
+
+    class RecordingOrchestrator:
+        def __init__(self) -> None:
+            self.requests = []
+
+        async def review(self, request):
+            self.requests.append(request)
+            return expected
+
+    orchestrator = RecordingOrchestrator()
+    backend = runner.RealReviewRunner(orchestrator_factory=lambda config: orchestrator)
+
+    result = backend.run(entry)
+
+    assert result is expected
+    assert orchestrator.requests[0].pr_url == entry.test_pr
+
+
 def test_runner_records_timeout_without_inflating_real_denominator(
     tmp_path: Path,
     monkeypatch,

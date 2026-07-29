@@ -2,7 +2,7 @@
 
 ReviewCrew 面向 GitHub Pull Request 或本地 Git `base/head` 差异进行证据驱动审查。系统由 Team Lead 规划风险与预算，DefectAgent 和 IntentAgent 并行产生候选，VerifierAgent 在候选到达时立即反证，最终输出结构化 JSON、中文 Markdown 报告和可供 Vue 前端消费的事件流。
 
-当前仓库已经具备离线 Fake 测试、FastAPI REST/SSE/Replay、Vue 3 控制台和 Greptile Benchmark Fake 流程。真实模型审查需要自行提供有效模型密钥；真实 Benchmark CLI 尚未接入执行器，五个公开案例仍为 `needs_review`，因此本项目不宣称已有真实 PR 命中率。真实状态见[评测报告](docs/评测报告.md)。
+当前仓库已经具备离线 Fake 测试、FastAPI REST/SSE/Replay、Vue 3 控制台和 Greptile Benchmark Fake/Real 流程。真实模型审查需要自行提供有效模型密钥；五个公开案例仍为 `needs_review`，因此 Real CLI 会拒绝生成空成绩，本项目也不宣称已有真实 PR 命中率。真实状态见[评测报告](docs/评测报告.md)。
 
 ## 架构亮点
 
@@ -258,7 +258,7 @@ python -m benchmark.runner --mode full --runner fake
 - `benchmark/results/fake-quick/summary.json`
 - `benchmark/results/fake-quick/summary.md`
 
-当前 `--runner real` CLI 会返回退出码 2，并提示需要通过 `RealReviewRunner(executor=...)` 注入真实 ReviewCrew 执行器；这是明确的未接入状态，不是“0 案例成功”。生产数据骨架位于 `benchmark/dataset.yaml`，五条公开记录均为 `needs_review`，完成人工回溯前不会进入真实命中率分母。
+`--runner real` 已直接接入 ReviewCrew Orchestrator：对每个通过完整校验的 `ready` 案例审查其 `test_pr`，再使用相同 Judge 生成报告。生产数据骨架位于 `benchmark/dataset.yaml`；当前五条公开记录均为 `needs_review`，所以 CLI 返回退出码 2 并拒绝生成“0 案例成功”。完成人工回溯并补齐真实修复 PR、40 位提交 SHA、目标行和语义关键词后，无需修改代码即可运行。
 
 ## 测试与构建
 

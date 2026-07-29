@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,7 +13,9 @@ from typing import Literal, Protocol
 
 import yaml
 
-from reviewcrew.schemas import CodeEvidence, Finding, ReviewResult
+from reviewcrew.config import Config
+from reviewcrew.pipeline.orchestrator import Orchestrator
+from reviewcrew.schemas import CodeEvidence, Finding, ReviewRequest, ReviewResult
 
 from benchmark.judge import judge_case
 from benchmark.models import BenchmarkSummary, CaseReport, DatasetEntry, JudgeResult, load_dataset
@@ -34,22 +37,33 @@ class ReviewRunner(Protocol):
 
 
 class RealReviewRunner:
-    """真实 ReviewCrew 执行器适配接口；调用方负责注入已授权执行函数。"""
+    """把已核验测试 PR 交给真实 ReviewCrew Orchestrator。"""
 
     name: Literal["real"] = "real"
     offline = False
 
-    def __init__(self, executor: Callable[[DatasetEntry], ReviewResult] | None = None) -> None:
+    def __init__(
+        self,
+        executor: Callable[[DatasetEntry], ReviewResult] | None = None,
+        *,
+        config: Config | None = None,
+        orchestrator_factory: Callable[[Config], Orchestrator] = Orchestrator,
+    ) -> None:
         self._executor = executor
+        self._config = config or Config()
+        self._orchestrator_factory = orchestrator_factory
 
     def run(self, entry: DatasetEntry) -> ReviewResult:
         """拒绝离线 fixture，并把真实案例交给注入的 ReviewCrew 执行器。"""
 
         if entry.source_kind == "offline_fixture":
             raise ValueError("真实 Runner 不得运行离线 fixture")
-        if self._executor is None:
-            raise RuntimeError("真实 Runner 需要注入 ReviewCrew 执行器")
-        return self._executor(entry)
+        if self._executor is not None:
+            return self._executor(entry)
+        if not entry.test_pr:
+            raise ValueError("真实 ready 案例缺少测试 PR")
+        orchestrator = self._orchestrator_factory(self._config)
+        return asyncio.run(orchestrator.review(ReviewRequest(pr_url=entry.test_pr)))
 
 
 class FakeReviewRunner:
@@ -288,15 +302,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """运行 CLI；Fake 使用离线 fixture，Real 未注入执行器时明确拒绝伪成功。"""
+    """运行 CLI；真实模式仅执行通过完整校验的 ready 测试 PR。"""
 
     args = build_parser().parse_args(argv)
-    if args.runner == "real":
-        print(
-            "真实 Runner CLI 尚未接入执行器；请通过 RealReviewRunner(executor=...) 注入 ReviewCrew。",
-            file=sys.stderr,
-        )
-        return 2
     effective_mode: Mode = "case" if args.case_id else args.mode
     dataset_path = args.dataset or (
         ROOT / "fixtures" / "fake_dataset.yaml" if args.runner == "fake" else ROOT / "dataset.yaml"
@@ -306,6 +314,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         entries = load_dataset(dataset_path, ready_only=True)
     except (OSError, ValueError, yaml.YAMLError):
         print("Benchmark 数据集无法读取或未通过校验。", file=sys.stderr)
+        return 2
+    if not entries:
+        print("Benchmark 没有通过人工核验的 ready 案例，拒绝生成空成绩。", file=sys.stderr)
         return 2
     backend = make_backend(args.runner)
     try:
@@ -320,7 +331,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Benchmark 参数错误：{error}", file=sys.stderr)
         return 2
     print(f"Benchmark 完成：{summary.selected_cases} 个案例；报告：{output_dir}")
-    return 0
+    return 0 if summary.actually_run_ready_cases else 2
 
 
 if __name__ == "__main__":
