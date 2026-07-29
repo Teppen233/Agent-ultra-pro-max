@@ -1,0 +1,126 @@
+# 仅用于离线链路测试；所有仓库、PR 与提交标识均明确使用 fixture 命名，不代表公开事实。
+cases:
+  - id: sentry-offline-01
+    project: sentry
+    title: 离线分页器导入案例
+    language: Python
+    severity: high
+    status: ready
+    source_kind: offline_fixture
+    source_url: fixture://greptile/sentry-01
+    upstream_repo: fixture/getsentry-sentry
+    fork_repo: fixture/reviewcrew-sentry
+    test_pr: fixture://reviewcrew/sentry/pr/1
+    source_fix_pr: fixture://reviewcrew/sentry/source-fix/1
+    base_sha: fixture-sentry-base
+    head_sha: fixture-sentry-head
+    introducing_commit: fixture-sentry-introducing
+    fixing_commit: fixture-sentry-fixing
+    bug_locations:
+      - file: src/pagination.py
+        start_line: 40
+        end_line: 42
+    bug_description: 导入不存在的分页器会导致模块加载失败。
+    mechanism_keywords: [不存在的分页器]
+    impact_keywords: [模块加载失败]
+    line_tolerance: 0
+
+  - id: calcom-offline-01
+    project: calcom
+    title: 离线日历归属校验案例
+    language: TypeScript
+    severity: critical
+    status: ready
+    source_kind: offline_fixture
+    source_url: fixture://greptile/calcom-01
+    upstream_repo: fixture/calcom-cal.com
+    fork_repo: fixture/reviewcrew-cal.com
+    test_pr: fixture://reviewcrew/calcom/pr/1
+    source_fix_pr: fixture://reviewcrew/calcom/source-fix/1
+    base_sha: fixture-calcom-base
+    head_sha: fixture-calcom-head
+    introducing_commit: fixture-calcom-introducing
+    fixing_commit: fixture-calcom-fixing
+    bug_locations:
+      - file: packages/auth/session.ts
+        start_line: 20
+        end_line: 22
+    bug_description: 查询缺少资源归属校验，其他用户可读取日历。
+    mechanism_keywords: [缺少资源归属校验]
+    impact_keywords: [其他用户可读取日历]
+    line_tolerance: 10
+
+  - id: grafana-offline-01
+    project: grafana
+    title: 离线并发映射写入案例
+    language: Go
+    severity: high
+    status: ready
+    source_kind: offline_fixture
+    source_url: fixture://greptile/grafana-01
+    upstream_repo: fixture/grafana-grafana
+    fork_repo: fixture/reviewcrew-grafana
+    test_pr: fixture://reviewcrew/grafana/pr/1
+    source_fix_pr: fixture://reviewcrew/grafana/source-fix/1
+    base_sha: fixture-grafana-base
+    head_sha: fixture-grafana-head
+    introducing_commit: fixture-grafana-introducing
+    fixing_commit: fixture-grafana-fixing
+    bug_locations:
+      - file: pkg/cache/cache.go
+        start_line: 70
+        end_line: 72
+    bug_description: 多个 goroutine 并发写普通 map 会导致进程 panic。
+    mechanism_keywords: [并发写普通 map]
+    impact_keywords: [进程 panic]
+    line_tolerance: 10
+
+  - id: keycloak-offline-01
+    project: keycloak
+    title: 离线令牌过期校验案例
+    language: Java
+    severity: critical
+    status: ready
+    source_kind: offline_fixture
+    source_url: fixture://greptile/keycloak-01
+    upstream_repo: fixture/keycloak-keycloak
+    fork_repo: fixture/reviewcrew-keycloak
+    test_pr: fixture://reviewcrew/keycloak/pr/1
+    source_fix_pr: fixture://reviewcrew/keycloak/source-fix/1
+    base_sha: fixture-keycloak-base
+    head_sha: fixture-keycloak-head
+    introducing_commit: fixture-keycloak-introducing
+    fixing_commit: fixture-keycloak-fixing
+    bug_locations:
+      - file: services/LoginService.java
+        start_line: 100
+        end_line: 102
+    bug_description: 认证路径未检查令牌过期时间，会接受过期令牌。
+    mechanism_keywords: [未检查令牌过期时间]
+    impact_keywords: [接受过期令牌]
+    line_tolerance: 0
+
+  - id: discourse-offline-01
+    project: discourse
+    title: 离线主题可见性案例
+    language: Ruby
+    severity: high
+    status: ready
+    source_kind: offline_fixture
+    source_url: fixture://greptile/discourse-01
+    upstream_repo: fixture/discourse-discourse
+    fork_repo: fixture/reviewcrew-discourse
+    test_pr: fixture://reviewcrew/discourse/pr/1
+    source_fix_pr: fixture://reviewcrew/discourse/source-fix/1
+    base_sha: fixture-discourse-base
+    head_sha: fixture-discourse-head
+    introducing_commit: fixture-discourse-introducing
+    fixing_commit: fixture-discourse-fixing
+    bug_locations:
+      - file: app/models/topic.rb
+        start_line: 200
+        end_line: 202
+    bug_description: 查询绕过可见性作用域，会泄露私有主题。
+    mechanism_keywords: [绕过可见性作用域]
+    impact_keywords: [泄露私有主题]
+    line_tolerance: 10

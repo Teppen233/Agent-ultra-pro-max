@@ -1,0 +1,114 @@
+# 公开 Greptile Case Library 的五仓最小骨架。
+# 公开页面未提供上游原始修复 PR、引入/修复提交与目标行映射，因此全部 needs_review。
+# 禁止在完成人工回溯前补猜测 SHA、目标文件或伪成功链接。
+cases:
+  - id: sentry-public-01
+    project: sentry
+    title: Enhanced Pagination Performance for High-Volume Audit Logs
+    language: Python
+    severity: high
+    status: needs_review
+    source_kind: public_case
+    source_url: https://www.greptile.com/benchmarks?format=markdown
+    upstream_repo: getsentry/sentry
+    fork_repo: ai-code-review-evaluation/sentry-greptile
+    test_pr: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1
+    source_fix_pr: null
+    # 以下仅是已调研核验的重建测试 PR base/head，不是上游原始引入/修复提交。
+    base_sha: a5d290951def84afdcc4c88d2f1f20023fc36e2a
+    head_sha: 8ab88145113dd23a930e23b9cbbcf8b30e4c0b17
+    introducing_commit: null
+    fixing_commit: null
+    bug_locations: []
+    bug_description: Importing non-existent OptimizedCursorPaginator
+    mechanism_keywords: []
+    impact_keywords: []
+    line_tolerance: 0
+
+  - id: calcom-public-01
+    project: calcom
+    title: Async import of the appStore packages
+    language: TypeScript
+    severity: low
+    status: needs_review
+    source_kind: public_case
+    source_url: https://www.greptile.com/benchmarks?format=markdown
+    upstream_repo: calcom/cal.com
+    fork_repo: ai-code-review-evaluation/cal.com-greptile
+    test_pr: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/2
+    source_fix_pr: null
+    base_sha: null
+    head_sha: null
+    introducing_commit: null
+    fixing_commit: null
+    bug_locations: []
+    bug_description: Async callbacks in forEach creates unhandled promise rejections
+    mechanism_keywords: []
+    impact_keywords: []
+    line_tolerance: 0
+
+  - id: grafana-public-01
+    project: grafana
+    title: "Anonymous: Add configurable device limit"
+    language: Go
+    severity: high
+    status: needs_review
+    source_kind: public_case
+    source_url: https://www.greptile.com/benchmarks?format=markdown
+    upstream_repo: grafana/grafana
+    fork_repo: ai-code-review-evaluation/grafana-greptile
+    test_pr: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/1
+    source_fix_pr: null
+    base_sha: null
+    head_sha: null
+    introducing_commit: null
+    fixing_commit: null
+    bug_locations: []
+    bug_description: Race condition in CreateOrUpdateDevice method
+    mechanism_keywords: []
+    impact_keywords: []
+    line_tolerance: 0
+
+  - id: keycloak-public-01
+    project: keycloak
+    title: Fixing Re-authentication with passkeys
+    language: Java
+    severity: medium
+    status: needs_review
+    source_kind: public_case
+    source_url: https://www.greptile.com/benchmarks?format=markdown
+    upstream_repo: keycloak/keycloak
+    fork_repo: ai-code-review-evaluation/keycloak-greptile
+    test_pr: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1
+    source_fix_pr: null
+    base_sha: null
+    head_sha: null
+    introducing_commit: null
+    fixing_commit: null
+    bug_locations: []
+    bug_description: ConditionalPasskeysEnabled() called without UserModel parameter
+    mechanism_keywords: []
+    impact_keywords: []
+    line_tolerance: 0
+
+  - id: discourse-public-01
+    project: discourse
+    title: "FEATURE: automatically downsize large images"
+    language: Ruby
+    severity: medium
+    status: needs_review
+    source_kind: public_case
+    source_url: https://www.greptile.com/benchmarks?format=markdown
+    upstream_repo: discourse/discourse
+    fork_repo: ai-code-review-evaluation/discourse-greptile
+    test_pr: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/1
+    source_fix_pr: null
+    base_sha: null
+    head_sha: null
+    introducing_commit: null
+    fixing_commit: null
+    bug_locations: []
+    bug_description: Method overwriting causing parameter mismatch
+    mechanism_keywords: []
+    impact_keywords: []
+    line_tolerance: 0

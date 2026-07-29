@@ -30,4 +30,5 @@ include = ["reviewcrew*", "benchmark*"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 asyncio_mode = "auto"
+pythonpath = ["."]
 testpaths = ["tests"]
