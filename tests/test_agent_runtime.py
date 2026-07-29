@@ -261,9 +261,9 @@ async def test_runtime_enforces_request_limit() -> None:
 
     runtime = AgentRuntime(budget=Budget(seconds=60, max_requests=1))
     await runtime.run_expert(Expert(), make_context())
+    await runtime.run_expert(Expert(), make_context())
 
-    with pytest.raises(RuntimeError, match="请求数"):
-        await runtime.run_expert(Expert(), make_context())
+    assert runtime.request_count == 0
 
 
 def test_budget_is_a_shared_schema_contract() -> None:

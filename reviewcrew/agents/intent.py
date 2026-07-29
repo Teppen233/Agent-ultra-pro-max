@@ -7,6 +7,7 @@ from typing import Any
 from pydantic_ai.models import Model
 
 from reviewcrew.agents._expert import ExpertAgent
+from reviewcrew.team.publisher import MessagePublisher
 from reviewcrew.agents.base import AgentRuntime, ReviewAgentProtocol
 from reviewcrew.config import Config
 
@@ -22,7 +23,8 @@ class IntentAgent(ExpertAgent, ReviewAgentProtocol):
         config: Config | None = None,
         runtime: AgentRuntime | None = None,
         tools: tuple[Any, ...] = (),
-        collaboration_window_seconds: float = 0.1,
+        collaboration_window_seconds: float | None = None,
+        publisher: MessagePublisher | None = None,
     ) -> None:
         super().__init__(
             role="intent",
@@ -32,6 +34,7 @@ class IntentAgent(ExpertAgent, ReviewAgentProtocol):
             runtime=runtime,
             tools=tools,
             collaboration_window_seconds=collaboration_window_seconds,
+            publisher=publisher,
         )
 
     def _checks(self) -> list[str]:

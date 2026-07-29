@@ -39,7 +39,10 @@ class MessagePublisher:
         self.run_id = run_id
         self.mailbox = mailbox
         self.blackboard = blackboard
-        self.allocator = allocator or SequenceAllocator(initial)
+        if allocator is not None:
+            self.allocator = allocator
+        else:
+            self.allocator = self._allocators.setdefault(run_id, SequenceAllocator(initial))
 
     async def publish(self, *, sender: str, recipient: str, kind: str, key: str, payload: dict[str, Any], correlation_id: str | None = None) -> bool:
         """以单一分配点构造、投递并记录一条安全结构化消息。"""
@@ -53,3 +56,4 @@ class MessagePublisher:
         if self.blackboard is not None:
             self.blackboard.apply(message)
         return True
+    _allocators: dict[str, SequenceAllocator] = {}

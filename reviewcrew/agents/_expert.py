@@ -47,7 +47,7 @@ class ExpertAgent:
         runtime: AgentRuntime | None = None,
         tools: Sequence[Any] = (),
         publisher: MessagePublisher | None = None,
-        collaboration_window_seconds: float = 0.1,
+        collaboration_window_seconds: float | None = None,
     ) -> None:
         self.role = role
         self._model = model
@@ -81,7 +81,7 @@ class ExpertAgent:
             snapshot = self._normalize_snapshot(snapshot, context, agent_id)
             await self._publish_findings(snapshot, context, publisher)
             await self._respond_to_requests(snapshot, context, mailbox, blackboard, publisher)
-            await self._consume_collaboration_window(snapshot, context, mailbox, publisher)
+            await self._consume_collaboration_window(snapshot, context, mailbox, publisher, effective_budget)
             await self._publish(
                 context,
                 publisher,
@@ -236,14 +236,14 @@ class ExpertAgent:
                     correlation_id=message.correlation_id or request.finding_id,
                 )
 
-    async def _consume_collaboration_window(self, snapshot: AgentSnapshot, context: ContextPack, mailbox: Mailbox | None, publisher: MessagePublisher | None) -> None:
+    async def _consume_collaboration_window(self, snapshot: AgentSnapshot, context: ContextPack, mailbox: Mailbox | None, publisher: MessagePublisher | None, budget: Budget) -> None:
         """在明确且有界的窗口内处理候选发布后到达的定向请求。"""
 
         if mailbox is None:
             return
         mailbox.register(snapshot.agent_id)
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._collaboration_window_seconds
+        deadline = loop.time() + (self._collaboration_window_seconds if self._collaboration_window_seconds is not None else budget.seconds)
         while loop.time() < deadline and (len(self._handled_handoffs) < 2 or not self._handled_evidence):
             try:
                 message = await mailbox.receive_one(snapshot.agent_id, timeout=max(0.0, deadline - loop.time()))

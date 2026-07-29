@@ -106,6 +106,7 @@ async def test_defect_agent_publishes_sql_injection_candidate_from_fake_model(tm
     snapshot = await DefectAgent(
         model=make_model(category="security", line=10, title="SQL 拼接可注入"),
         runtime=AgentRuntime(),
+        collaboration_window_seconds=0.01,
     ).run(make_context(), mailbox=mailbox, blackboard=blackboard, budget=Budget(seconds=60))
 
     assert snapshot.findings[0].category == "security"
@@ -126,6 +127,7 @@ async def test_intent_agent_publishes_falsy_sample_rate_candidate_from_fake_mode
     snapshot = await IntentAgent(
         model=make_model(category="logic", line=22, title="零采样率被错误跳过"),
         runtime=AgentRuntime(),
+        collaboration_window_seconds=0.01,
     ).run(make_context(sample_rate=True), mailbox=mailbox, blackboard=blackboard, budget=Budget(seconds=60))
 
     assert snapshot.findings[0].category == "logic"
@@ -187,6 +189,7 @@ async def test_expert_responds_to_structured_handoff_and_evidence_request(tmp_pa
     await DefectAgent(
         model=make_model(category="security", line=10, title="SQL 拼接可注入"),
         runtime=AgentRuntime(),
+        collaboration_window_seconds=0.01,
     ).run(make_context(), mailbox=mailbox, blackboard=blackboard, budget=Budget(seconds=60))
 
     assert blackboard.by_kind("handoff_response")[0].correlation_id == "handoff-correlation"
@@ -245,7 +248,7 @@ async def test_expert_rejects_candidate_without_intersecting_diff_evidence(tmp_p
     mailbox = Mailbox(tmp_path, "run-evidence")
     blackboard = EvidenceBlackboard("run-evidence")
 
-    snapshot = await DefectAgent(model=model).run(make_context(), mailbox=mailbox, blackboard=blackboard)
+    snapshot = await DefectAgent(model=model, collaboration_window_seconds=0.01).run(make_context(), mailbox=mailbox, blackboard=blackboard)
 
     assert snapshot.findings == []
     assert blackboard.by_kind("candidate_finding") == []

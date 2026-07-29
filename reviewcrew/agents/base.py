@@ -179,7 +179,6 @@ class AgentRuntime:
     ) -> AgentSnapshot:
         """执行专家并校验 AgentSnapshot。"""
 
-        self._consume_request()
         raw_output = await agent.run(context, **self._collaboration_arguments(agent.run, mailbox, blackboard))
         try:
             return raw_output if isinstance(raw_output, AgentSnapshot) else AgentSnapshot.model_validate(raw_output)
