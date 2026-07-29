@@ -99,8 +99,8 @@ onBeforeUnmount(() => controller.abort())
       </section>
       <section class="report-layout">
         <div>
-          <div class="report-toolbar panel"><div><span class="eyebrow">已验证问题</span><h2>问题明细</h2></div><div class="filters"><select v-model="severity" aria-label="严重度筛选"><option value="all">全部严重度</option><option value="critical">严重</option><option value="high">高危</option><option value="medium">中危</option><option value="low">低危</option></select><select v-model="category" aria-label="类别筛选"><option value="all">全部类别</option><option value="security">安全</option><option value="logic">逻辑</option><option value="reliability">可靠性</option></select></div></div>
-          <div class="report-findings"><FindingCard v-for="finding in findings" :key="finding.id" :finding="finding" verdict="accepted" /><p v-if="!findings.length" class="empty-state panel">当前筛选条件下没有问题。</p></div>
+          <div class="report-toolbar panel"><div><span class="eyebrow">{{ statusView.listEyebrow }}</span><h2>问题明细</h2></div><div class="filters"><select v-model="severity" aria-label="严重度筛选"><option value="all">全部严重度</option><option value="critical">严重</option><option value="high">高危</option><option value="medium">中危</option><option value="low">低危</option></select><select v-model="category" aria-label="类别筛选"><option value="all">全部类别</option><option value="security">安全</option><option value="logic">逻辑</option><option value="reliability">可靠性</option></select></div></div>
+          <div class="report-findings"><FindingCard v-for="finding in findings" :key="finding.id" :finding="finding" :verdict="statusView.findingVerdict" :verdict-text="statusView.findingVerdictText" /><p v-if="!findings.length" class="empty-state panel">当前筛选条件下没有问题。</p></div>
         </div>
         <aside>
           <section class="coverage-card panel"><span class="eyebrow">审查覆盖</span><h2>已检查文件</h2><div class="coverage-ring"><strong>{{ metrics.coverageCount }}</strong><small>个文件</small></div><ul v-if="metrics.coverage.length"><li v-for="file in metrics.coverage" :key="file"><span>{{ file }}</span><b>已检查</b></li></ul><p v-else class="empty-state">暂无覆盖文件数据。</p></section>

@@ -60,13 +60,16 @@ describe('页面展示模型', () => {
   it('按 completed、partial、failed 区分结果语义，Demo 使用离线耗时文案', () => {
     expect(presentResultStatus('completed', false)).toMatchObject({
       tone: 'success', eyebrow: '审查完成', findingNote: '经独立验证', elapsedNote: '服务端实际结果',
+      listEyebrow: '已验证问题', findingVerdict: 'accepted', findingVerdictText: '',
     })
     expect(presentResultStatus('partial', false)).toMatchObject({
       tone: 'warning', eyebrow: '审查部分完成', findingNote: '部分结果，需人工复核',
+      listEyebrow: '当前可用问题', findingVerdict: 'pending', findingVerdictText: '需人工复核',
     })
     expect(presentResultStatus('partial', false).findingNote).not.toContain('独立验证')
     expect(presentResultStatus('failed', false)).toMatchObject({
       tone: 'danger', eyebrow: '审查失败', findingNote: '失败前保留结果',
+      listEyebrow: '当前可用问题', findingVerdict: 'pending', findingVerdictText: '需人工复核',
     })
     expect(presentResultStatus('completed', true).elapsedNote).toBe('离线演示耗时')
   })

@@ -125,6 +125,19 @@ describe('API Client', () => {
     await expect(fetchLatestBenchmark()).rejects.toThrow('评测摘要格式无效。')
   })
 
+  it('拒绝用数组伪装的 Benchmark 枚举字段', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      mode: ['quick'], runner: ['real'], offline: false, selected_cases: 5, completed_cases: 5,
+      actually_run_ready_cases: 5, caught_cases: 3, real_catch_rate: 0.6,
+      observed_offline_catch_rate: null, offline_results_excluded_from_real_rate: false,
+      false_positive_count: 0, verifier_accepted_count: 3, verifier_rejected_count: 0,
+      needs_human_review_cases: 0, timed_out_cases: 0, elapsed_seconds: 12,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetcher)
+
+    await expect(fetchLatestBenchmark()).rejects.toThrow('评测摘要格式无效。')
+  })
+
   it('轮询运行中状态，只有完整终态才返回 ReviewResult', async () => {
     const payloads = [
       { run_id: 'run-123', status: 'running' },

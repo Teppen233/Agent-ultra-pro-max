@@ -1,4 +1,4 @@
-import type { BenchmarkSummary, ReviewResult } from '@/contracts'
+import type { BenchmarkSummary, ReviewResult, VerdictStatus } from '@/contracts'
 
 export interface BenchmarkPresentation {
   kind: 'real' | 'offline' | 'unavailable'
@@ -19,6 +19,9 @@ export interface ResultStatusPresentation {
   findingNote: string
   rejectedPrefix: string
   elapsedNote: string
+  listEyebrow: string
+  findingVerdict: VerdictStatus
+  findingVerdictText: string
 }
 
 const percent = (value: number): string => `${(value * 100).toFixed(1)}%`
@@ -65,17 +68,20 @@ export const presentResultStatus = (
     return {
       tone: 'warning', eyebrow: '审查部分完成', summaryLead: '审查部分完成，当前保留',
       summaryUnit: '个可用问题', findingNote: '部分结果，需人工复核', rejectedPrefix: '部分流程已记录', elapsedNote,
+      listEyebrow: '当前可用问题', findingVerdict: 'pending', findingVerdictText: '需人工复核',
     }
   }
   if (status === 'failed') {
     return {
       tone: 'danger', eyebrow: '审查失败', summaryLead: '审查未完成，当前保留',
       summaryUnit: '个可用问题', findingNote: '失败前保留结果', rejectedPrefix: '失败前已记录', elapsedNote,
+      listEyebrow: '当前可用问题', findingVerdict: 'pending', findingVerdictText: '需人工复核',
     }
   }
   return {
     tone: 'success', eyebrow: '审查完成', summaryLead: '审查已收敛，发现',
     summaryUnit: '个有效问题', findingNote: '经独立验证', rejectedPrefix: '独立验证者拒绝', elapsedNote,
+    listEyebrow: '已验证问题', findingVerdict: 'accepted', findingVerdictText: '',
   }
 }
 

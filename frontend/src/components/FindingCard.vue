@@ -33,7 +33,7 @@ const categoryText: Record<string, string> = {
     <div v-if="finding.suggestion || finding.recommendation" class="suggestion"><strong>修复建议</strong>{{ finding.suggestion ?? finding.recommendation }}</div>
     <footer :class="verdict">
       <svg viewBox="0 0 24 24"><path v-if="verdict === 'accepted'" d="m5 12 4 4L19 6" /><path v-else d="m6 6 12 12M18 6 6 18" /></svg>
-      <span><strong>{{ verdict === 'accepted' ? 'Verifier 已确认' : verdict === 'rejected' ? 'Verifier 已拒绝' : '等待 Verifier' }}</strong><small v-if="verdictText">{{ verdictText }}</small></span>
+      <span><strong>{{ verdict === 'accepted' ? 'Verifier 已确认' : verdict === 'rejected' ? 'Verifier 已拒绝' : verdictText || '等待 Verifier' }}</strong><small v-if="verdictText && verdict !== 'pending'">{{ verdictText }}</small></span>
     </footer>
   </article>
 </template>

@@ -152,8 +152,10 @@ const asBenchmarkSummary = (value: unknown): BenchmarkSummary => {
   const validRate = (rate: unknown): boolean =>
     rate === null || (typeof rate === 'number' && Number.isFinite(rate) && rate >= 0 && rate <= 1)
   if (
-    !['quick', 'case', 'full'].includes(String(payload.mode))
-    || !['fake', 'real'].includes(String(payload.runner))
+    typeof payload.mode !== 'string'
+    || !['quick', 'case', 'full'].includes(payload.mode)
+    || typeof payload.runner !== 'string'
+    || !['fake', 'real'].includes(payload.runner)
     || typeof payload.offline !== 'boolean'
     || !validIntegerFields
     || !validRate(payload.real_catch_rate)
