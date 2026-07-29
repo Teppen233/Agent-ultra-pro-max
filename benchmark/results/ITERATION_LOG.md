@@ -106,3 +106,32 @@
 ### 结论
 
 1.1.4 在不减少 Verifier 补证窗口、不修改 Prompt/Skill/Judge 的前提下显著降低真实耗时，晋升为 `stable`，并成为当前 Champion 候选。
+
+## Retrieval-01：跨文件调用证据与终态竞态修复
+
+- 时间：2026-07-30 04:36（北京时间）
+- 父版本：`feature-1.1.4-mw@01b3d25`
+- 当前版本：`feature-1.1.5-mw@9fee642`
+- 归因层：Retrieval / Runtime
+- Prompt 聚合 SHA-256：`fa36d2597f3bca9fb8665d01f1d3a84a98df61a889a01b104d119de20b79685a`
+- Skill 聚合 SHA-256：`2c173d3c2078cab2282213338f61fa9338e6396adda3b4c15348fb6ccbca9c63`
+
+### 根因与修改
+
+- `ContextPack.related_code` 和 Verifier 消费通道已经存在，但 Context Builder 从未填充跨文件实现或调用入口。
+- 从新增声明行保守提取最多 3 个 Python/TypeScript/JavaScript/Go/Java 符号，检索当前文件之外的代码引用；排除 Markdown 等文档噪声，稳定去重并最多保留 10 条 `CodeEvidence`。
+- 独立复审发现最后一个专家可能在注册 Mailbox 前触发 Verifier 终态广播。专家现在进入运行时立即注册，确定性竞态测试证明不再等满兜底窗口。
+
+### 目标与邻近回归
+
+- Cal.com 风格 fixture：修改 `packages/auth/session.ts` 的 `getCalendar`，成功定位 `apps/web/api/calendar.ts` 调用入口与准确行范围。
+- 文档中同名字符串不会进入 `related_code`；当前修改文件、重复证据被排除，总数不超过 10。
+- 相关 Context/Expert/Verifier/Orchestrator 回归：55 项通过。
+- 后端全量：196 项通过。
+- 前端：25 项通过；生产构建 60 modules 通过。
+- Fake quick：5/5 完成、2 命中、3 个非目标 Finding、0 超时，与基线一致。
+- 相同真实审查 `dbdb23c^ → dbdb23c`：`run-20260729-203428-67713bf5`，状态 completed，0 Finding，约 59 秒。该耗时优于 1.1.4，但模型响应存在波动，不把全部降幅归因于检索修改。
+
+### 结论
+
+1.1.5 同时补齐了跨文件 Localization 证据和团队终态竞态，全部硬门禁通过，晋升为 `stable` 与当前 Champion 候选。
