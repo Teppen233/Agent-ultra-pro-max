@@ -216,7 +216,15 @@ class Orchestrator:
         blackboard = EvidenceBlackboard(run_id)
         publisher = _EventingPublisher(mailbox=mailbox, blackboard=blackboard, events=self._events)
         state = _RunState(run_id, started_at, mailbox, blackboard, publisher)
-        self._events.emit(run_id, "review.started", {"mode": self._request_mode(request)})
+        started_data = {"mode": self._request_mode(request)}
+        if request.repo_path is not None:
+            started_data.update(
+                {
+                    "repository": Path(request.repo_path).resolve().name,
+                    "title": f"本地审查 {request.base_ref} → {request.head_ref}",
+                }
+            )
+        self._events.emit(run_id, "review.started", started_data)
 
         try:
             async with asyncio.timeout(self._global_timeout):
