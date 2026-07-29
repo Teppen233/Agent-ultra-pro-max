@@ -19,6 +19,8 @@
         class="input"
         placeholder="https://github.com/owner/repo/pull/123"
         :disabled="submitting"
+        autofocus
+        @keydown.enter="handleStart"
       />
       <button class="btn btn-primary" :disabled="!prUrl.trim() || submitting" @click="handleStart">
         <span v-if="submitting" class="spinner"></span>
@@ -35,6 +37,7 @@
         class="input"
         placeholder="d:/projects/my-repo"
         :disabled="submitting"
+        @keydown.enter="handleStart"
       />
       <div class="form-row">
         <div class="form-group">
@@ -65,6 +68,7 @@
         class="input"
         placeholder="输入已有的 run_id"
         :disabled="submitting"
+        @keydown.enter="handleStart"
       />
       <button
         class="btn btn-primary"
@@ -98,6 +102,15 @@ const errorMsg = ref('')
 
 async function handleStart() {
   errorMsg.value = ''
+
+  // PR 模式 URL 格式校验
+  if (mode.value === 'pr' && prUrl.value.trim()) {
+    if (!/^https?:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(prUrl.value.trim())) {
+      errorMsg.value = '请输入有效的 GitHub PR URL，如 https://github.com/owner/repo/pull/123'
+      return
+    }
+  }
+
   submitting.value = true
 
   try {

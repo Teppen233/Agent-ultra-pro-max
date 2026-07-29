@@ -150,6 +150,28 @@ body {
   transform: translateY(-8px);
 }
 
+/* 减弱动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: none;
+  }
+
+  .fade-enter-from,
+  .fade-leave-to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* 全局焦点可见样式 */
 :focus-visible {
   outline: none;

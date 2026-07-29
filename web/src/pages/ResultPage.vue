@@ -99,7 +99,7 @@ import FindingCard from '../components/FindingCard.vue'
 
 const route = useRoute()
 const store = useReviewStore()
-const runId = route.params.runId as string
+const runId = route.params.runId as string | undefined
 
 const filterSeverity = ref('')
 const filterCategory = ref('')
@@ -108,6 +108,11 @@ const error = ref<string | null>(null)
 const loading = ref(true)
 
 onMounted(async () => {
+  if (!runId) {
+    error.value = '缺少审查 Run ID，请从首页发起审查。'
+    loading.value = false
+    return
+  }
   try {
     const status = await getStatus(runId)
     store.reset()
@@ -138,6 +143,7 @@ const filteredFindings = computed(() => {
 })
 
 async function downloadReport() {
+  if (!runId) return
   try {
     const text = await getReport(runId)
     const blob = new Blob([text], { type: 'text/markdown' })
@@ -159,6 +165,7 @@ function formatMs(ms: number): string {
 }
 
 async function retryLoad() {
+  if (!runId) return
   error.value = null
   loading.value = true
   try {

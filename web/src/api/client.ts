@@ -66,15 +66,11 @@ export function connectSSE(
         // 已收到过数据后关闭 → 正常结束
         onComplete?.()
       } else {
-        // 从未成功接收数据 → 连接失败
+        // 重试耗尽仍未收到数据 → 连接彻底失败
         onError?.(e)
       }
-      return
     }
-    // readyState === CONNECTING → 正在重试，先报错
-    if (!hasReceivedMessage) {
-      onError?.(e)
-    }
+    // readyState === CONNECTING → 自动重试中，不报错，等待重连
   }
 
   return es
@@ -120,10 +116,6 @@ export function replayEvents(
       } else {
         onError?.(e)
       }
-      return
-    }
-    if (!hasReceivedMessage) {
-      onError?.(e)
     }
   }
 

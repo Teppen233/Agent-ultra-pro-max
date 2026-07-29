@@ -3,6 +3,11 @@
     <h2>评测面板</h2>
     <p class="subtitle">5 个开源仓库的审查命中率统计</p>
 
+    <!-- 演示数据提示 -->
+    <div class="demo-banner">
+      ⚠️ 当前为演示数据，接入真实 API 后将展示实际评测结果。
+    </div>
+
     <!-- 总览 -->
     <div class="stats-row">
       <div class="stat-card">
@@ -105,6 +110,16 @@ function playReplay(runId: string) {
 .subtitle {
   color: var(--color-text-muted);
   font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.demo-banner {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  font-size: 13px;
   margin-bottom: 24px;
 }
 
