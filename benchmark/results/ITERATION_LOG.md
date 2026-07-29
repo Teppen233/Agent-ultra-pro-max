@@ -39,3 +39,31 @@
 
 自动化证据支持保留 Runtime 修改，但当前进程未保留运行时密钥，无法安全执行修复后的真实本地审查。版本暂列 `candidate`；补做真实 smoke 与本地 base/head 审查且不再出现阶段超时后，才可升级为 `stable`。
 
+## Verification-01：让 Verifier 消费专家已检索上下文
+
+- 时间：2026-07-30 04:15（北京时间）
+- 父版本：`feature-1.1.2-mw@92acac9`
+- 当前版本：`feature-1.1.3-mw@af8877b`
+- 归因层：Verification / Runtime
+- Prompt 聚合 SHA-256：`fa36d2597f3bca9fb8665d01f1d3a84a98df61a889a01b104d119de20b79685a`
+- Skill 聚合 SHA-256：`2c173d3c2078cab2282213338f61fa9338e6396adda3b4c15348fb6ccbca9c63`
+
+### 假设与修改
+
+生产专家原先只发布 Finding 与 `context_id`，Verifier 虽支持 `verification_context`，却拿不到 Context Builder 已检索的入口、相关实现和测试证据。现在候选消息按 `enclosing_code → related_code → related_tests` 的稳定优先级携带最多 12 条去重 `CodeEvidence`，不改变公共 Finding 或 Judge 口径。
+
+复审同时发现并修复：空字符串密钥错误触发生产模型、兼容端点旧配置默认走不支持的工具式结构化输出、协作窗口短于首次 Verifier 模型超时可能错过补证。测试模型仍自动使用原生工具协议。
+
+### 同案例与邻近回归
+
+- 新增失败测试先确认候选载荷缺少 `verification_context`，实现后转绿。
+- 专家、Verifier、配置和运行时定向测试：54 项通过。
+- 后端全量：192 项通过。
+- 前端：25 项通过；生产构建 60 modules 通过。
+- 目标案例 `calcom-offline-01`：Fake Runner 仍为 0/1，1 个非目标 Finding；这是故意的文件层负例，Fake Runner 绕过 Agent Team，不作为本修改收益指标。
+- 邻近案例 `sentry-offline-01`：Fake Runner 1/1 命中、0 非目标 Finding、0.01 秒，未回归。
+- Fake quick：5/5 完成、2 命中、3 个非目标 Finding、0 超时；与基线一致，确认未篡改 Judge 或 fixture。
+
+### 结论
+
+该实验修复了真实生产链路中“检索到了上下文但 Verifier 看不到”的断点，且自动化门禁无回归，保留为 `experimental`。由于没有修复后的真实模型运行证据，暂不晋升 stable，也不替代最终 Champion。
