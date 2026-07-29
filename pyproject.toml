@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-agent = ["pydantic-ai>=0.2"]
+agent = ["pydantic-ai>=2.20,<3"]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.25",
@@ -31,4 +31,3 @@ include = ["reviewcrew*", "benchmark*"]
 addopts = "-ra"
 asyncio_mode = "auto"
 testpaths = ["tests"]
-

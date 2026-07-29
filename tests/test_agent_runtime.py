@@ -1,14 +1,18 @@
 """Agent 运行时与 Team Lead 的结构化输出测试。"""
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from pydantic_ai.models.test import TestModel
 
-from reviewcrew.agents.base import AgentRuntime, Budget, ReviewAgentProtocol, VerifierProtocol
+from reviewcrew.agents.base import AgentRuntime, Budget, PromptSource, ReviewAgentProtocol, VerifierProtocol
+from reviewcrew.config import Config
+from reviewcrew.hooks import HookContext, HookManager
 from reviewcrew.agents.team_lead import TeamLeadAgent
 from reviewcrew.schemas import Budget as SchemaBudget
 from reviewcrew.schemas import CodeEvidence, ContextPack, Finding, PRData, ReviewPlan, Verdict
+from reviewcrew.skills.registry import SkillRegistry
 
 
 def make_context() -> ContextPack:
@@ -189,7 +193,7 @@ async def test_team_lead_routes_security_context_to_both_experts_without_finding
             files=[],
             raw_diff="+ token = request.token",
         ),
-        [make_context()],
+        [make_context().model_copy(update={"files": ["src/core.py"]})],
         Budget(seconds=60),
     )
 
@@ -212,7 +216,8 @@ async def test_team_lead_accepts_pydantic_ai_test_model_structured_plan() -> Non
             "budget_seconds": 1,
         }
     )
-    plan = await TeamLeadAgent(model=model).plan(
+    runtime = AgentRuntime(config=Config(llm_max_retries=2))
+    plan = await TeamLeadAgent(model=model, runtime=runtime).plan(
         PRData(
             provider="local",
             repository="acme/demo",
@@ -228,3 +233,111 @@ async def test_team_lead_accepts_pydantic_ai_test_model_structured_plan() -> Non
 
     assert plan.summary == "测试计划"
     assert plan.context_ids == ["ctx-auth"]
+    assert runtime.run_records[-1].output_schema == "ReviewPlan"
+
+
+@pytest.mark.asyncio
+async def test_runtime_assembles_prompt_in_fixed_order_and_records_only_hashes(tmp_path) -> None:
+    """公共运行时按固定顺序组装 Prompt，并只记录可审计的脱敏元数据。"""
+
+    shared = tmp_path / "shared.md"
+    role = tmp_path / "role.md"
+    shared.write_text("共享规则", encoding="utf-8")
+    role.write_text("角色提示", encoding="utf-8")
+    runtime = AgentRuntime(config=Config(llm_max_retries=3))
+    registry = SkillRegistry(Path(__file__).parents[1] / "reviewcrew" / "skills")
+    selected = registry.select("team_lead", ["security"], Budget(seconds=60))
+
+    prompt = runtime.compose_prompt(
+        sources=[PromptSource("shared", shared), PromptSource("role", role)],
+        skills=selected,
+        dynamic_context="ReviewPlan/Context/Mailbox",
+        budget=Budget(seconds=60),
+        output_schema="ReviewPlan",
+    )
+
+    record = runtime.run_records[-1]
+    assert prompt.index("共享规则") < prompt.index("角色提示") < prompt.index("风险路由")
+    assert record.prompt_file_hashes["shared"]
+    assert record.skills[0][0] == "risk-routing"
+    assert "共享规则" not in repr(record)
+
+
+@pytest.mark.asyncio
+async def test_team_lead_keeps_defect_route_when_model_omits_it() -> None:
+    """普通 PR 的模型输出不能移除 Defect 基线路由。"""
+
+    model = TestModel(
+        custom_output_args={
+            "summary": "计划",
+            "risk_tags": [],
+            "required_agents": ["intent"],
+            "context_ids": [],
+            "shards": {},
+            "budget_seconds": 1,
+        }
+    )
+
+    plan = await TeamLeadAgent(model=model).plan(
+        PRData(provider="local", repository="demo", title="普通变更", base_sha="b", head_sha="h", files=[], raw_diff="+ value = 1"),
+        [make_context()],
+        Budget(seconds=60),
+    )
+
+    assert plan.required_agents == ["defect", "intent"]
+
+
+@pytest.mark.asyncio
+async def test_team_lead_expands_large_pr_semantic_shards_only_with_budget() -> None:
+    """大 PR 仅在预算充足时扩展为按模块划分的语义分片。"""
+
+    contexts = [
+        make_context().model_copy(update={"id": "ctx-auth", "files": ["src/session.py"]}),
+        make_context().model_copy(update={"id": "ctx-payment", "files": ["src/payment.py"]}),
+    ]
+    pr = PRData(
+        provider="local",
+        repository="demo",
+        title="重构",
+        base_sha="b",
+        head_sha="h",
+        files=[],
+        raw_diff="+ value = 1\n" * 4_000,
+    )
+
+    expanded = await TeamLeadAgent().plan(pr, contexts, Budget(seconds=120))
+    constrained = await TeamLeadAgent().plan(pr, contexts, Budget(seconds=30))
+
+    assert set(expanded.shards) == {"defect:session", "defect:payment"}
+    assert constrained.shards == {"defect": ["ctx-auth", "ctx-payment"]}
+
+
+@pytest.mark.asyncio
+async def test_runtime_runs_hooks_around_structured_model_call(tmp_path) -> None:
+    """公共结构化路径在模型调用前后运行 Hook。"""
+
+    shared = tmp_path / "shared.md"
+    role = tmp_path / "role.md"
+    shared.write_text("共享规则", encoding="utf-8")
+    role.write_text("角色提示", encoding="utf-8")
+    hooks = HookManager()
+    observed: list[str] = []
+
+    async def capture(context: HookContext) -> None:
+        observed.append(context.role)
+
+    hooks.register("before_agent", capture)
+    hooks.register("after_agent", capture)
+    runtime = AgentRuntime(hook_manager=hooks)
+    output = await runtime.run_structured(
+        TestModel(custom_output_args={"summary": "计划", "budget_seconds": 1}),
+        role="team_lead",
+        sources=[PromptSource("shared", shared), PromptSource("role", role)],
+        skills=[],
+        dynamic_context="上下文",
+        budget=Budget(seconds=60),
+        output_type=ReviewPlan,
+    )
+
+    assert isinstance(output, ReviewPlan)
+    assert observed == ["team_lead", "team_lead"]

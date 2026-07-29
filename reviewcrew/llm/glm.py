@@ -6,7 +6,9 @@ import asyncio
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
@@ -18,7 +20,8 @@ from reviewcrew.config import Config
 
 
 logger = logging.getLogger(__name__)
-_MIN_STABLE_TEMPERATURE = 0.0
+_DEFAULT_GLM_MODEL = "glm-5.2"
+_DEFAULT_GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 
 
 def build_glm_model(config: Config) -> Model:
@@ -32,7 +35,7 @@ def build_glm_model(config: Config) -> Model:
     return OpenAIChatModel(
         config.llm_model,
         provider=provider,
-        settings={"temperature": _MIN_STABLE_TEMPERATURE},
+        settings={"temperature": config.llm_temperature, "timeout": config.llm_timeout_seconds},
     )
 
 
@@ -45,22 +48,47 @@ class _SmokeResponse(BaseModel):
 async def _smoke() -> int:
     """验证已配置的 GLM 能返回固定 Pydantic 对象。"""
 
-    api_key = os.environ.get("GLM_API_KEY")
-    if not api_key:
+    try:
+        config = build_smoke_config(os.environ)
+    except ValueError:
         print("未设置 GLM_API_KEY，无法执行 GLM 连通性检查。", file=sys.stderr)
         return 1
-    config = Config(llm_api_key=api_key)
-    agent = Agent(build_glm_model(config), output_type=_SmokeResponse, retries=config.llm_max_retries)
+    host = urlparse(config.llm_base_url).netloc
+    print(f"正在检查 GLM 模型 {config.llm_model}，目标主机：{host}。")
     try:
-        result = await agent.run("仅返回 status 为 ok 的对象。")
+        response = await _run_smoke_agent(config)
     except Exception as error:
         print(f"GLM 连通性检查失败：{type(error).__name__}", file=sys.stderr)
         return 1
-    if not isinstance(result.output, _SmokeResponse) or result.output.status != "ok":
+    if not isinstance(response, _SmokeResponse) or response.status != "ok":
         print("GLM 连通性检查失败：未返回预期的结构化对象。", file=sys.stderr)
         return 1
     print("GLM 连通性检查通过。")
     return 0
+
+
+def build_smoke_config(environ: Mapping[str, str]) -> Config:
+    """从 GLM 专用环境变量构造 smoke 配置，避免落到其他 Provider 默认值。"""
+
+    api_key = environ.get("GLM_API_KEY")
+    if not api_key:
+        raise ValueError("缺少 GLM_API_KEY")
+    return Config(
+        llm_api_key=api_key,
+        llm_model=environ.get("GLM_MODEL", _DEFAULT_GLM_MODEL),
+        llm_base_url=environ.get("GLM_BASE_URL", _DEFAULT_GLM_BASE_URL),
+        llm_temperature=float(environ.get("GLM_TEMPERATURE", "0.0")),
+        llm_timeout_seconds=float(environ.get("GLM_TIMEOUT_SECONDS", "120")),
+        llm_max_retries=int(environ.get("GLM_MAX_RETRIES", "2")),
+    )
+
+
+async def _run_smoke_agent(config: Config) -> _SmokeResponse:
+    """执行固定结构化 smoke 请求，便于离线替身验证目标配置。"""
+
+    agent = Agent(build_glm_model(config), output_type=_SmokeResponse, retries=config.llm_max_retries)
+    result = await agent.run("仅返回 status 为 ok 的对象。")
+    return result.output
 
 
 def main() -> int:

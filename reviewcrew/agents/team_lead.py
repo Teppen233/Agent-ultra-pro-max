@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
-from reviewcrew.agents.base import Budget
+from reviewcrew.agents.base import AgentRuntime, Budget, PromptSource
+from reviewcrew.config import Config
 from reviewcrew.schemas import ContextPack, PRData, ReviewPlan
 from reviewcrew.skills.registry import SkillRegistry
 
@@ -15,9 +15,17 @@ from reviewcrew.skills.registry import SkillRegistry
 class TeamLeadAgent:
     """为 PR 路由专家、上下文分片和预算，但从不生成 Finding。"""
 
-    def __init__(self, model: Model | None = None, skills_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        model: Model | None = None,
+        skills_root: Path | None = None,
+        config: Config | None = None,
+        runtime: AgentRuntime | None = None,
+    ) -> None:
         self._model = model
         self._skills_root = skills_root or Path(__file__).parent.parent / "skills"
+        self._config = config or Config()
+        self._runtime = runtime or AgentRuntime(config=self._config)
 
     async def plan(self, pr: PRData, contexts: list[ContextPack], budget: Budget) -> ReviewPlan:
         """生成并规范化审查计划。"""
@@ -38,23 +46,26 @@ class TeamLeadAgent:
 
         registry = SkillRegistry(self._skills_root)
         selected = registry.select("team_lead", risk_tags, budget)
-        prompt = registry.compose_prompt(
-            shared_rule=self._read_prompt("shared-system.md"),
-            role_prompt=self._read_prompt("team-lead.md"),
+        proposed = await self._runtime.run_structured(
+            self._model,
+            role="team_lead",
+            sources=[
+                PromptSource("shared-system", Path(__file__).parent / "prompts" / "shared-system.md"),
+                PromptSource("team-lead", Path(__file__).parent / "prompts" / "team-lead.md"),
+            ],
             skills=selected,
-            dynamic_context=f"PR：{pr.title}\n上下文：{', '.join(fallback.context_ids)}",
-            remaining_budget=budget.seconds,
-            output_schema="ReviewPlan",
+            dynamic_context=self._context_summary(pr, contexts, fallback.context_ids),
+            budget=budget,
+            output_type=ReviewPlan,
         )
-        result = await Agent(self._model, output_type=ReviewPlan, retries=1).run(prompt)
-        return self._normalize_plan(result.output, fallback)
+        return self._normalize_plan(proposed, fallback)
 
     def _normalize_plan(self, proposed: ReviewPlan, fallback: ReviewPlan) -> ReviewPlan:
         """强制安全路由、上下文边界和预算边界。"""
 
-        required_agents = list(proposed.required_agents)
-        if "security" in fallback.risk_tags:
-            required_agents = ["defect", "intent"]
+        required_agents = list(dict.fromkeys(["defect", *proposed.required_agents]))
+        if "security" in fallback.risk_tags and "intent" not in required_agents:
+            required_agents.append("intent")
         return proposed.model_copy(
             update={
                 "risk_tags": list(dict.fromkeys([*fallback.risk_tags, *proposed.risk_tags])),
@@ -90,8 +101,32 @@ class TeamLeadAgent:
         if not context_ids:
             return {agent: [] for agent in agents}
         if (len(pr.files) >= 10 or len(pr.raw_diff) >= 20_000) and budget.can_expand_shards:
-            return {agent: list(context_ids) for agent in agents}
+            shards: dict[str, list[str]] = {}
+            for agent in agents:
+                for context in contexts:
+                    semantic_name = TeamLeadAgent._semantic_name(context)
+                    shards.setdefault(f"{agent}:{semantic_name}", []).append(context.id)
+            return shards
         return {agent: list(context_ids) for agent in agents}
+
+    @staticmethod
+    def _semantic_name(context: ContextPack) -> str:
+        """从变更文件生成确定性的模块语义标签。"""
+
+        if context.files:
+            return Path(context.files[0]).stem.replace(" ", "-")
+        return context.id
+
+    @staticmethod
+    def _context_summary(pr: PRData, contexts: list[ContextPack], context_ids: list[str]) -> str:
+        """为规划模型提供不含代码正文的上下文摘要。"""
+
+        summary = [f"PR：{pr.title}", f"上下文数量：{len(context_ids)}"]
+        summary.extend(
+            f"上下文 {context.id}：文件 {', '.join(context.files)}；差异块 {len(context.diff_hunks)}"
+            for context in contexts
+        )
+        return "\n".join(summary)
 
     def _read_prompt(self, name: str) -> str:
         """读取版本化 Prompt 文件。"""

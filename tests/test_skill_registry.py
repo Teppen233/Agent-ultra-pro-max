@@ -26,3 +26,16 @@ def test_skill_metadata_selection_prompt_order_and_stable_hash() -> None:
     assert selected[0].version
     assert prompt.index("共享规则") < prompt.index("角色提示") < prompt.index("风险路由")
     assert registry.prompt_hash(prompt) == registry.prompt_hash(prompt)
+
+
+def test_skill_content_change_changes_recorded_hash(tmp_path: Path) -> None:
+    """Skill 内容或版本变化时哈希必须改变。"""
+
+    first = tmp_path / "first.md"
+    first.write_text("---\nname: demo\nversion: '1'\nroles: [team_lead]\n---\n规则一", encoding="utf-8")
+
+    first_skill = SkillRegistry(tmp_path)._skills[0]
+    first.write_text("---\nname: demo\nversion: '2'\nroles: [team_lead]\n---\n规则二", encoding="utf-8")
+    second_skill = SkillRegistry(tmp_path)._skills[0]
+
+    assert first_skill.content_hash != second_skill.content_hash

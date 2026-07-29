@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import inspect
+from hashlib import sha256
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import ValidationError
+from pydantic_ai import Agent
+from pydantic_ai.models import Model
 
+from reviewcrew.config import Config
+from reviewcrew.hooks import HookContext, HookManager
 from reviewcrew.schemas import Budget, ContextPack, Finding, Verdict
+
+if TYPE_CHECKING:
+    from reviewcrew.skills.registry import SkillDefinition
 
 
 @runtime_checkable
@@ -44,14 +53,97 @@ class VerifierProtocol(Protocol):
 RuntimeEventSink = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
 
+@dataclass(frozen=True, slots=True)
+class PromptSource:
+    """一个可审计的版本化 Prompt 文件来源。"""
+
+    name: str
+    path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeRecord:
+    """不包含 Prompt、响应或密钥的运行审计元数据。"""
+
+    prompt_file_hashes: dict[str, str]
+    skills: tuple[tuple[str, str, str], ...]
+    output_schema: str
+    model_name: str | None
+
+
 @dataclass(slots=True)
 class AgentRuntime:
     """验证 Agent 输出、记录最小事件并限制请求数量。"""
 
     budget: Budget | None = None
+    config: Config = field(default_factory=Config)
+    hook_manager: HookManager | None = None
     event_sink: RuntimeEventSink | None = None
     max_validation_retries: int = 1
     _request_count: int = field(default=0, init=False)
+    run_records: list[RuntimeRecord] = field(default_factory=list, init=False)
+
+    def compose_prompt(
+        self,
+        *,
+        sources: list[PromptSource],
+        skills: list[SkillDefinition],
+        dynamic_context: str,
+        budget: Budget,
+        output_schema: str,
+        model_name: str | None = None,
+    ) -> str:
+        """按共享规则、角色、Skill、动态数据、预算和 Schema 的固定顺序组装 Prompt。"""
+
+        source_texts: list[str] = []
+        hashes: dict[str, str] = {}
+        for source in sources:
+            content = source.path.read_text(encoding="utf-8")
+            source_texts.append(content)
+            hashes[source.name] = sha256(content.encode("utf-8")).hexdigest()
+        skill_text = "\n\n".join(skill.content for skill in skills)
+        prompt = "\n\n".join(
+            [*source_texts, skill_text, dynamic_context, f"剩余预算：{budget.seconds} 秒", f"输出 Schema：{output_schema}"]
+        )
+        self.run_records.append(
+            RuntimeRecord(
+                prompt_file_hashes=hashes,
+                skills=tuple((skill.name, skill.version, skill.content_hash) for skill in skills),
+                output_schema=output_schema,
+                model_name=model_name,
+            )
+        )
+        return prompt
+
+    async def run_structured(
+        self,
+        model: Model,
+        *,
+        role: str,
+        sources: list[PromptSource],
+        skills: list[SkillDefinition],
+        dynamic_context: str,
+        budget: Budget,
+        output_type: type[Any],
+    ) -> Any:
+        """通过统一的 Prompt、预算和重试路径执行结构化模型请求。"""
+
+        prompt = self.compose_prompt(
+            sources=sources,
+            skills=skills,
+            dynamic_context=dynamic_context,
+            budget=budget,
+            output_schema=output_type.__name__,
+            model_name=model.model_name,
+        )
+        self._consume_request(budget)
+        agent = Agent(model, output_type=output_type, retries=self.config.llm_max_retries)
+        if self.hook_manager is not None:
+            await self.hook_manager.run("before_agent", HookContext(role=role))
+        result = await agent.run(prompt)
+        if self.hook_manager is not None:
+            await self.hook_manager.run("after_agent", HookContext(role=role))
+        return result.output
 
     async def run_expert(
         self,
@@ -118,11 +210,12 @@ class AgentRuntime:
                     raise ValueError(f"{agent_label}输出不符合{output_type.__name__}结构") from error
                 attempts += 1
 
-    def _consume_request(self) -> None:
+    def _consume_request(self, budget: Budget | None = None) -> None:
         """统一执行请求预算检查。"""
 
-        if self.budget is not None:
-            self.budget.consume_request()
+        effective_budget = self.budget or budget
+        if effective_budget is not None:
+            effective_budget.consume_request()
         self._request_count += 1
 
     async def _emit(self, event_name: str, data: dict[str, Any]) -> None:
