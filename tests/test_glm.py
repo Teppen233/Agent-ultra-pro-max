@@ -1,6 +1,7 @@
 """GLM 兼容模型构建测试。"""
 
 from pydantic import SecretStr
+from pydantic_ai.output import PromptedOutput
 
 from reviewcrew.config import Config
 import reviewcrew.llm.glm as glm
@@ -62,3 +63,27 @@ async def test_smoke_uses_glm_config_for_the_model_call(monkeypatch) -> None:
     assert await glm._smoke() == 0
     assert captured[0].llm_model == "glm-5.2"
     assert captured[0].llm_base_url == "https://open.bigmodel.cn/api/paas/v4/"
+
+
+async def test_smoke_uses_prompted_json_output_for_compatible_endpoints(monkeypatch) -> None:
+    """Smoke 应避免依赖部分兼容端点不支持的工具式结构化输出。"""
+
+    captured: list[object] = []
+
+    class FakeResult:
+        output = glm._SmokeResponse(status="ok")
+
+    class FakeAgent:
+        def __init__(self, model, *, output_type, retries):
+            captured.append(output_type)
+
+        async def run(self, prompt: str) -> FakeResult:
+            return FakeResult()
+
+    monkeypatch.setattr(glm, "Agent", FakeAgent)
+    monkeypatch.setattr(glm, "build_glm_model", lambda config: object())
+
+    result = await glm._run_smoke_agent(Config(llm_api_key="test-key"))
+
+    assert result.status == "ok"
+    assert isinstance(captured[0], PromptedOutput)

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.output import PromptedOutput
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from reviewcrew.config import Config
@@ -86,7 +87,11 @@ def build_smoke_config(environ: Mapping[str, str]) -> Config:
 async def _run_smoke_agent(config: Config) -> _SmokeResponse:
     """执行固定结构化 smoke 请求，便于离线替身验证目标配置。"""
 
-    agent = Agent(build_glm_model(config), output_type=_SmokeResponse, retries=config.llm_max_retries)
+    agent = Agent(
+        build_glm_model(config),
+        output_type=PromptedOutput(_SmokeResponse),
+        retries=config.llm_max_retries,
+    )
     result = await agent.run("仅返回 status 为 ok 的对象。")
     return result.output
 
