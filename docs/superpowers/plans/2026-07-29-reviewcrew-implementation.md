@@ -225,7 +225,7 @@ git commit -m "feat: 定义审查领域模型与工程配置"
 - Produces: `Mailbox.receive(agent_id: str) -> AsyncIterator[TeamMessage]`
 - Produces: `EvidenceBlackboard.apply(message: TeamMessage) -> None`
 
-- [ ] **Step 1: 写事件顺序和持久化测试**
+- [x] **Step 1: 写事件顺序和持久化测试**
 
 ```python
 def test_events_receive_monotonic_sequence(tmp_path):
@@ -237,13 +237,13 @@ def test_events_receive_monotonic_sequence(tmp_path):
     assert store.read(run_id) == [first, second]
 ```
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `pytest tests/test_events.py -v`
 
 Expected: FAIL，因为 `EventStore` 不存在。
 
-- [ ] **Step 3: 写 Mailbox 幂等、过期和路由测试**
+- [x] **Step 3: 写 Mailbox 幂等、过期和路由测试**
 
 ```python
 @pytest.mark.asyncio
@@ -259,17 +259,17 @@ async def test_mailbox_routes_private_message_once(tmp_path):
 
 另写测试确认已过期 `verification_request` 不会送达、广播消息可以被订阅角色接收、消息追加到 `mailbox.jsonl`。
 
-- [ ] **Step 4: 实现 JSONL 事件存储、Mailbox 和 Blackboard**
+- [x] **Step 4: 实现 JSONL 事件存储、Mailbox 和 Blackboard**
 
 每条事件立即刷新到 `runs/{run_id}/events.jsonl`，消息刷新到 `runs/{run_id}/mailbox.jsonl`。Mailbox 使用每 Agent `asyncio.Queue`、广播订阅、消息 ID 幂等集合和 correlation ID。Blackboard 只保存 Context、Signal、Finding、Verdict、Snapshot 和状态，不保存隐藏思维链。
 
-- [ ] **Step 5: 运行测试并确认通过**
+- [x] **Step 5: 运行测试并确认通过**
 
 Run: `pytest tests/test_events.py tests/test_mailbox.py -v`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add reviewcrew/events.py reviewcrew/team tests/test_events.py tests/test_mailbox.py
