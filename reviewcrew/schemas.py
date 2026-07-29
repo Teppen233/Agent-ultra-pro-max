@@ -1,0 +1,297 @@
+"""定义 ReviewCrew 全局唯一的领域模型。"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, model_validator
+
+
+class ReviewRequest(BaseModel):
+    """一次审查、回放或本地提交比较请求。"""
+
+    pr_url: str | None = None
+    repo_path: str | None = None
+    base_ref: str | None = None
+    head_ref: str | None = None
+    replay_run_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> "ReviewRequest":
+        """确保请求只选择一种完整输入模式。"""
+
+        github_mode = self.pr_url is not None
+        replay_mode = self.replay_run_id is not None
+        local_fields = (self.repo_path, self.base_ref, self.head_ref)
+        local_mode = all(value is not None for value in local_fields)
+        partial_local_mode = any(value is not None for value in local_fields) and not local_mode
+        if partial_local_mode:
+            raise ValueError("本地模式必须同时提供仓库路径、基准引用和目标引用")
+        if sum((github_mode, replay_mode, local_mode)) != 1:
+            raise ValueError("审查请求必须且只能选择一种输入模式")
+        return self
+
+
+class DiffHunk(BaseModel):
+    """统一差异中的一个修改块。"""
+
+    id: str
+    file: str
+    old_start: int = Field(ge=0)
+    old_count: int = Field(ge=0)
+    new_start: int = Field(ge=0)
+    new_count: int = Field(ge=0)
+    changed_lines: list[int] = Field(default_factory=list)
+    content: str
+
+
+class ChangedFile(BaseModel):
+    """一次 PR 中的变更文件。"""
+
+    path: str
+    old_path: str | None = None
+    status: Literal["added", "modified", "deleted", "renamed"]
+    additions: int = Field(default=0, ge=0)
+    deletions: int = Field(default=0, ge=0)
+    hunks: list[DiffHunk] = Field(default_factory=list)
+
+
+class PRData(BaseModel):
+    """经过标准化的 PR 元数据与差异。"""
+
+    provider: Literal["github", "local"]
+    repository: str
+    title: str
+    description: str = ""
+    base_sha: str
+    head_sha: str
+    author: str | None = None
+    files: list[ChangedFile] = Field(default_factory=list)
+    raw_diff: str
+
+
+class CodeEvidence(BaseModel):
+    """带精确位置的代码证据。"""
+
+    source: str
+    file: str
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    description: str
+    content: str
+    content_hash: str | None = None
+
+    @model_validator(mode="after")
+    def validate_lines(self) -> "CodeEvidence":
+        """校验证据行号顺序。"""
+
+        if self.end_line < self.start_line:
+            raise ValueError("证据结束行不能小于开始行")
+        return self
+
+
+class TextEvidence(BaseModel):
+    """来自项目文档或 Git 历史的文本证据。"""
+
+    source: str
+    title: str
+    content: str
+    reference: str | None = None
+
+
+class StaticSignal(BaseModel):
+    """传统扫描工具产生的待裁决信号。"""
+
+    provider: str
+    rule_id: str
+    file: str
+    line: int = Field(ge=1)
+    message: str
+    severity: Literal["critical", "high", "medium", "low", "info"]
+
+
+class ContextPack(BaseModel):
+    """围绕一组修改构造的受预算约束上下文。"""
+
+    id: str
+    repository: str
+    base_sha: str
+    head_sha: str
+    pr_title: str
+    pr_description: str = ""
+    files: list[str]
+    diff_hunks: list[DiffHunk]
+    enclosing_code: list[CodeEvidence] = Field(default_factory=list)
+    related_code: list[CodeEvidence] = Field(default_factory=list)
+    related_tests: list[CodeEvidence] = Field(default_factory=list)
+    project_docs: list[TextEvidence] = Field(default_factory=list)
+    git_history: list[TextEvidence] = Field(default_factory=list)
+    static_signals: list[StaticSignal] = Field(default_factory=list)
+    retrieval_notes: list[str] = Field(default_factory=list)
+    truncated: bool = False
+
+
+FindingCategory = Literal[
+    "static",
+    "business_logic",
+    "logic",
+    "memory",
+    "security",
+    "architecture",
+    "reliability",
+]
+Severity = Literal["critical", "high", "medium", "low"]
+
+
+class Finding(BaseModel):
+    """专家 Agent 发布、等待验证的候选问题。"""
+
+    id: str
+    producer: Literal["defect", "intent"]
+    category: FindingCategory
+    severity: Severity
+    confidence: float = Field(ge=0.0, le=1.0)
+    file: str
+    line_start: int = Field(ge=1)
+    line_end: int = Field(ge=1)
+    title: str
+    description: str
+    trigger_condition: str
+    impact: str
+    reasoning_summary: str
+    suggestion: str | None = None
+    evidence: list[CodeEvidence] = Field(min_length=1)
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def validate_lines(self) -> "Finding":
+        """校验候选问题的行号顺序。"""
+
+        if self.line_end < self.line_start:
+            raise ValueError("候选问题结束行不能小于开始行")
+        return self
+
+
+class Verdict(BaseModel):
+    """Verifier 对候选问题给出的最终裁决。"""
+
+    finding_id: str
+    accepted: bool
+    verdict: Literal[
+        "confirmed",
+        "likely",
+        "insufficient_evidence",
+        "false_positive",
+        "duplicate",
+        "not_introduced_by_pr",
+        "not_on_changed_line",
+        "style_only",
+    ]
+    confidence: float = Field(ge=0.0, le=1.0)
+    severity: Severity | None = None
+    reason: str
+    final_finding: Finding | None = None
+
+
+class ReviewResult(BaseModel):
+    """一次审查运行的最终结果。"""
+
+    run_id: str
+    status: Literal["completed", "partial", "failed"]
+    repository: str
+    base_sha: str
+    head_sha: str
+    findings: list[Finding] = Field(default_factory=list)
+    rejected_count: int = Field(default=0, ge=0)
+    coverage: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    started_at: datetime
+    completed_at: datetime
+    elapsed_seconds: float = Field(ge=0.0)
+
+
+class ReviewPlan(BaseModel):
+    """TeamLead 为本次 PR 生成的并行审查计划。"""
+
+    summary: str
+    risk_tags: list[str] = Field(default_factory=list)
+    required_agents: list[Literal["defect", "intent"]] = Field(default_factory=list)
+    context_ids: list[str] = Field(default_factory=list)
+    shards: dict[str, list[str]] = Field(default_factory=dict)
+    budget_seconds: int = Field(gt=0)
+
+
+MessageKind = Literal[
+    "review_plan",
+    "context_available",
+    "static_signal",
+    "candidate_finding",
+    "handoff_request",
+    "handoff_response",
+    "verification_request",
+    "evidence_response",
+    "verdict",
+    "agent_snapshot",
+    "agent_completed",
+    "agent_failed",
+    "budget_warning",
+    "cancel",
+]
+
+
+class TeamMessage(BaseModel):
+    """Agent Team 内部使用的类型化消息外壳。"""
+
+    id: str
+    run_id: str
+    sequence: int = Field(ge=1)
+    timestamp: datetime
+    sender: str
+    recipient: str
+    kind: MessageKind
+    correlation_id: str | None = None
+    expires_at: datetime | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class HandoffRequest(BaseModel):
+    """一个专家向另一专家发送的定向移交。"""
+
+    source_agent: str
+    target_agent: Literal["defect", "intent"]
+    hypothesis: str
+    file: str
+    lines: list[int]
+    requested_check: str
+    evidence: list[CodeEvidence] = Field(default_factory=list)
+
+
+class VerificationRequest(BaseModel):
+    """Verifier 向原专家发出的补证请求。"""
+
+    finding_id: str
+    target_agent: Literal["defect", "intent"]
+    question: str
+    required_evidence: list[str] = Field(default_factory=list)
+    deadline_seconds: int = Field(default=30, gt=0, le=120)
+
+
+class EvidenceResponse(BaseModel):
+    """专家针对补证请求返回的结构化响应。"""
+
+    finding_id: str
+    conclusion: Literal["supported", "withdrawn", "uncertain"]
+    evidence: list[CodeEvidence] = Field(default_factory=list)
+    summary: str
+
+
+class AgentSnapshot(BaseModel):
+    """Agent 在超时或收敛前保存的当前成果。"""
+
+    agent_id: str
+    findings: list[Finding] = Field(default_factory=list)
+    completed_checks: list[str] = Field(default_factory=list)
+    pending_checks: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+

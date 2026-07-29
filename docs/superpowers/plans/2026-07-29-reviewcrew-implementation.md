@@ -156,11 +156,11 @@ web/src/fixtures/demo-events.jsonl     稳定演示事件
 - Produces: `ReviewPlan`, `TeamMessage`, `HandoffRequest`, `VerificationRequest`, `EvidenceResponse`, `AgentSnapshot`
 - Constraint: 字段必须与设计规范第 5 节一致。
 
-- [ ] **Step 1: 创建最小 Python 工程配置**
+- [x] **Step 1: 创建最小 Python 工程配置**
 
 在 `pyproject.toml` 声明 Python `>=3.12`，运行依赖包括 `pydantic>=2.8`、`pydantic-settings`、`pydantic-ai`、`httpx`、`fastapi`、`uvicorn`、`pyyaml`，开发依赖包括 `pytest`、`pytest-asyncio`、`respx`。
 
-- [ ] **Step 2: 写配置失败测试**
+- [x] **Step 2: 写配置失败测试**
 
 ```python
 def test_config_rejects_invalid_global_timeout(monkeypatch):
@@ -169,7 +169,7 @@ def test_config_rejects_invalid_global_timeout(monkeypatch):
         Config.from_env()
 ```
 
-- [ ] **Step 3: 写 Schema 失败测试**
+- [x] **Step 3: 写 Schema 失败测试**
 
 ```python
 def test_finding_requires_confidence_in_range():
@@ -182,23 +182,23 @@ def test_review_request_requires_exactly_one_mode():
         ReviewRequest(pr_url="https://example/pr/1", replay_run_id="run-1")
 ```
 
-- [ ] **Step 4: 运行测试并确认失败**
+- [x] **Step 4: 运行测试并确认失败**
 
 Run: `pytest tests/test_config.py tests/test_schemas.py -v`
 
 Expected: FAIL，因为模块或校验尚不存在。
 
-- [ ] **Step 5: 实现配置和完整领域模型**
+- [x] **Step 5: 实现配置和完整领域模型**
 
 所有公开类和复杂校验器写中文 docstring。默认预算为 `30/90/300/120/30/600` 秒；`Config` 从环境读取 GLM base URL、模型名、API Key、GitHub Token、并发数和运行目录。
 
-- [ ] **Step 6: 运行测试并确认通过**
+- [x] **Step 6: 运行测试并确认通过**
 
 Run: `pytest tests/test_config.py tests/test_schemas.py -v`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```powershell
 git add pyproject.toml .env.example .gitignore reviewcrew tests/test_config.py tests/test_schemas.py
