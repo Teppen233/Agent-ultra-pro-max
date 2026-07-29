@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 2026-07-30 12:00 前实现可运行、可测试、可演示的 ReviewCrew，以 GLM 5.2 和三个 Subagent 审查 Git PR diff，并完成 Greptile Benchmark 快速评测、Vue 3 前端和中文交付文档。
+**Goal:** 在北京时间（Asia/Shanghai，UTC+8）2026-07-30 12:00 硬截止前实现并整理好可提交、可运行、可测试、可演示的 ReviewCrew，以 GLM 5.2 和三个 Subagent 审查 Git PR diff，并完成 Greptile Benchmark 快速评测、Vue 3 前端和中文交付文档。
 
 **Architecture:** 系统使用 FastAPI 和纯 `asyncio` Orchestrator 串联 PR 加载、Diff 解析、上下文构建、两个并行专家 Agent、确定性去重、独立 Verifier 和报告生成。前端只消费冻结的 REST/SSE `PipelineEvent`，并支持从同一事件格式回放历史运行。
 
@@ -25,7 +25,8 @@
 - 所有测试默认不依赖网络和真实 API Key；真实调用只存在于显式 smoke 命令。
 - 每完成一个可独立验收的任务立即提交，不把多个大能力堆进一个提交。
 - 不提交 `.env`、API Key、`runs/`、Benchmark 仓库副本、构建产物、IDE 文件或模型缓存。
-- 2026-07-30 12:00 停止新增功能；12:00 至 14:00 只允许修复阻断交付的问题。
+- 所有时间均以北京时间（Asia/Shanghai，UTC+8）计算。
+- 2026-07-30 11:30 停止新增功能并冻结代码；12:00 是全部代码、测试、文档和材料的硬截止，12:00 后不安排任何开发或交付缓冲。
 
 ---
 
@@ -73,8 +74,8 @@
 - API Key 缺失不阻塞离线实现；完成全部 Fake 和 Replay 能力后记录真实 smoke 待执行。
 - GitHub 限流时支持公开 PR 的无 Token 请求，并提供本地 base/head 模式。
 - Semgrep 未安装时自动跳过，不允许让审查失败。
-- 若距离 12:00 少于 90 分钟，停止新增 Provider、动画和非必要抽象，优先完成测试、README、Benchmark 报告和稳定 Replay。
-- 若距离 12:00 少于 30 分钟，只处理阻断启动、构建、审查或报告生成的问题。
+- 若北京时间距离 12:00 少于 90 分钟，停止新增 Provider、动画和非必要抽象，优先完成测试、README、Benchmark 报告和稳定 Replay。
+- 北京时间 11:30 起只允许处理阻断启动、构建、审查、报告生成或最终提交的问题。
 - 只有同一阻塞条件连续出现至少三轮且无法通过离线替代继续时，才允许将 Goal 标为 blocked。
 
 ---
@@ -884,7 +885,7 @@ Run: `python -m benchmark.runner --mode quick`
 
 - [ ] **Step 8: 11:30 冻结代码**
 
-更新评测报告、选择最佳 Replay、检查敏感信息、提交最终代码。12:00 后停止功能开发。
+更新评测报告、选择最佳 Replay、检查敏感信息并提交最终代码。北京时间 11:30 冻结，12:00 前完成全部交付检查。
 
 ---
 
@@ -909,4 +910,4 @@ Run: `python -m benchmark.runner --mode quick`
 
 创建 Goal 时使用以下完整目标，避免只写“完成项目”导致范围漂移：
 
-> 严格执行 `docs/superpowers/plans/2026-07-29-reviewcrew-implementation.md`，在 2026-07-30 12:00 前实现 ReviewCrew 的完整可运行版本。必须先阅读对应设计规范，按 Task 顺序使用测试驱动开发，频繁提交 Git，并在每次续跑时从第一个未完成 checkbox 继续。系统必须包含 GLM 5.2、DefectAgent、IntentAgent、VerifierAgent、PR diff 和上下文工具、600 秒 watchdog、JSON/Markdown 报告、FastAPI REST/SSE/Replay、Vue 3 前端和 Greptile Benchmark quick/case/full 流程。所有代码注释、docstring、TSDoc、运行日志、错误提示和报告正文使用中文；不得保存密钥、完整 Prompt 或隐藏思维链。外部服务失败时先完成 Fake、fixture、Replay 和离线测试并实现明确降级。只有后端测试、前端测试与构建、Fake 端到端、Benchmark Fake quick 和至少一个真实审查完成后才能标记 Goal 完成；若缺少 GLM API Key，必须明确记录真实 smoke 未执行，不得伪造成功。12:00 后不得新增功能，只允许修复阻断交付的问题。
+> 严格执行 `docs/superpowers/plans/2026-07-29-reviewcrew-implementation.md`，在北京时间（Asia/Shanghai，UTC+8）2026-07-30 12:00 硬截止前实现并整理好 ReviewCrew 的完整可提交版本。必须先阅读对应设计规范，按 Task 顺序使用测试驱动开发，频繁提交 Git，并在每次续跑时从第一个未完成 checkbox 继续。系统必须包含 GLM 5.2、DefectAgent、IntentAgent、VerifierAgent、PR diff 和上下文工具、600 秒 watchdog、JSON/Markdown 报告、FastAPI REST/SSE/Replay、Vue 3 前端和 Greptile Benchmark quick/case/full 流程。所有代码注释、docstring、TSDoc、运行日志、错误提示和报告正文使用中文；不得保存密钥、完整 Prompt 或隐藏思维链。外部服务失败时先完成 Fake、fixture、Replay 和离线测试并实现明确降级。只有后端测试、前端测试与构建、Fake 端到端、Benchmark Fake quick 和至少一个真实审查完成后才能标记 Goal 完成；若缺少 GLM API Key，必须明确记录真实 smoke 未执行，不得伪造成功。北京时间 11:30 必须冻结代码，12:00 是全部代码、测试、文档和材料的硬截止，12:00 后不安排开发或交付缓冲。
