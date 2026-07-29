@@ -211,6 +211,33 @@ class ReviewResult(BaseModel):
     elapsed_seconds: float = Field(ge=0.0)
 
 
+class Budget(BaseModel):
+    """跨 Agent 编排共享的时间与模型请求预算。"""
+
+    seconds: int = Field(gt=0)
+    max_requests: int = Field(default=8, gt=0)
+    requests_used: int = Field(default=0, ge=0)
+
+    @property
+    def remaining_requests(self) -> int:
+        """返回剩余的模型请求数量。"""
+
+        return self.max_requests - self.requests_used
+
+    @property
+    def can_expand_shards(self) -> bool:
+        """仅在剩余时间和请求均充足时允许增加新的分片。"""
+
+        return self.seconds >= 60 and self.remaining_requests > 0
+
+    def consume_request(self) -> None:
+        """消耗一次模型请求，超限时拒绝执行。"""
+
+        if self.remaining_requests <= 0:
+            raise RuntimeError("模型请求数已达到预算上限")
+        self.requests_used += 1
+
+
 class ReviewPlan(BaseModel):
     """TeamLead 为本次 PR 生成的并行审查计划。"""
 
@@ -294,4 +321,3 @@ class AgentSnapshot(BaseModel):
     completed_checks: list[str] = Field(default_factory=list)
     pending_checks: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-
