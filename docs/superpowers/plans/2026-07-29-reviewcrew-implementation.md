@@ -535,27 +535,27 @@ git commit -m "feat: 实现主 Agent、Hooks 与 Skill 运行时"
 - Produces: `IntentAgent.run(context: ContextPack, mailbox: Mailbox, blackboard: EvidenceBlackboard) -> AgentSnapshot`
 - Both implement: `ReviewAgentProtocol`
 
-- [ ] **Step 1: 写 Prompt 合同测试**
+- [x] **Step 1: 写 Prompt 合同测试**
 
 断言 Defect Prompt 明确包含静态、安全、内存/资源三个分节；Intent Prompt 明确包含意图总结、行为总结、偏差比较、边界与架构检查。
 
-- [ ] **Step 2: 写 Fake Model 输出测试**
+- [x] **Step 2: 写 Fake Model 输出测试**
 
 构造一个 SQL 拼接 Context 和一个 `sample_rate=0.0` 被 falsy 跳过的 Context，断言两个 Agent 分别输出正确类别和修改行。
 
-- [ ] **Step 3: 运行测试并确认失败**
+- [x] **Step 3: 运行测试并确认失败**
 
 Run: `pytest tests/test_expert_agents.py -v`
 
-- [ ] **Step 4: 实现两个 Agent**
+- [x] **Step 4: 实现两个 Agent**
 
 DefectAgent 可访问 Semgrep 信号和只读代码工具；IntentAgent 优先读取 PR 描述、测试、项目文档和相关代码。候选通过 Mailbox 流式发布，两个专家支持最多两次结构化 handoff。禁止输出纯风格建议。
 
-- [ ] **Step 5: 运行测试并确认通过**
+- [x] **Step 5: 运行测试并确认通过**
 
 Run: `pytest tests/test_expert_agents.py -v`
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
 git add reviewcrew/agents/defect.py reviewcrew/agents/intent.py reviewcrew/agents/prompts tests/test_expert_agents.py
