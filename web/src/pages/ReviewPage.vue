@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useReviewStore } from '../stores/review'
 import { connectSSE } from '../api/client'
@@ -78,8 +78,16 @@ const store = useReviewStore()
 
 const runId = route.params.runId as string
 
+// 响应式当前时间，用于驱动倒计时每秒更新
+const now = ref(Date.now())
+let timerHandle: ReturnType<typeof setInterval> | null = null
+
 onMounted(() => {
   store.reset()
+  timerHandle = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+
   const es = connectSSE(
     runId,
     (event) => {
@@ -94,12 +102,21 @@ onMounted(() => {
 })
 
 let onUnmountedCleanup: () => void = () => {}
-onUnmounted(() => onUnmountedCleanup())
+onUnmounted(() => {
+  onUnmountedCleanup()
+  if (timerHandle) {
+    clearInterval(timerHandle)
+    timerHandle = null
+  }
+})
 
 // 600 秒倒计时
 const remainingSecs = computed(() => {
   if (!store.startTime) return 600
-  const elapsed = store.totalDurationMs
+  // 触发 now 的响应式依赖
+  void now.value
+  const startMs = new Date(store.startTime).getTime()
+  const elapsed = (store.endTime ? new Date(store.endTime).getTime() : Date.now()) - startMs
   const remaining = Math.max(0, 600_000 - elapsed)
   return Math.ceil(remaining / 1000)
 })

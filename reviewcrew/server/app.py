@@ -75,10 +75,10 @@ def _get_store() -> EventStore:
 async def start_review(request: ReviewRequest):
     """启动一次代码审查（异步后台任务）。"""
     orch = _get_orchestrator()
+    store = _get_store()
 
     # 如果是 Replay 模式，直接返回已有的运行
     if request.replay_run_id:
-        store = _get_store()
         events = store.read(request.replay_run_id)
         if not events:
             raise HTTPException(
@@ -87,18 +87,27 @@ async def start_review(request: ReviewRequest):
             )
         return {"run_id": request.replay_run_id, "mode": "replay"}
 
+    # 预创建 run_id 并发射启动事件，这样前端可立即开始轮询
+    run_id = store.create_run()
+    store.emit(run_id, "review.started", {
+        "run_id": run_id,
+        "repo": request.pr_url or request.repo_path or "",
+    })
+
     # 在后台启动审查
-    task = asyncio.create_task(orch.review(request))
-    run_id = None
+    async def _run_and_emit() -> None:
+        try:
+            result = await orch.review_with_run_id(run_id, request)
+        except Exception as e:
+            logger.exception("后台审查异常")
+            store.emit(run_id, "review.failed", {
+                "run_id": run_id,
+                "reason": f"审查异常: {e}",
+            })
 
-    try:
-        # 等待 run_id 产生
-        result = await asyncio.wait_for(task, timeout=5.0)
-        run_id = result.run_id
-    except asyncio.TimeoutError:
-        pass  # 任务仍在运行
+    asyncio.create_task(_run_and_emit())
 
-    return {"run_id": run_id or "pending", "mode": "live"}
+    return {"run_id": run_id, "mode": "live"}
 
 
 @app.get("/api/reviews/{run_id}")

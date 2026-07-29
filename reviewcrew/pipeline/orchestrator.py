@@ -33,21 +33,30 @@ class Orchestrator:
         self.model: Any = None  # 由调用方注入
 
     async def review(self, request: ReviewRequest) -> ReviewResult:
-        """执行一次完整的代码审查。
+        """执行一次完整的代码审查（便捷方法，自动创建 run_id）。"""
+        run_id = self.events.create_run()
+        return await self.review_with_run_id(run_id, request)
+
+    async def review_with_run_id(
+        self, run_id: str, request: ReviewRequest
+    ) -> ReviewResult:
+        """使用预创建的 run_id 执行审查（供 FastAPI 后台调用）。
 
         Args:
+            run_id: 已创建的事件流 ID
             request: 审查请求
 
         Returns:
             完整审查结果
         """
-        run_id = self.events.create_run()
         started_at = datetime.now(timezone.utc)
         warnings: list[str] = []
         all_findings: list[Finding] = []
 
-        # 发射开始事件
-        self.events.emit(run_id, "review.started", {"run_id": run_id})
+        # 发射开始事件（如果还没发射）
+        existing = self.events.read(run_id)
+        if not any(e.type == "review.started" for e in existing):
+            self.events.emit(run_id, "review.started", {"run_id": run_id})
 
         try:
             # 全局 watchdog
@@ -60,7 +69,7 @@ class Orchestrator:
                 )
 
                 # 阶段 2: 构建上下文
-                repo_path = request.repo_path or "."
+                repo_path = Path(request.repo_path) if request.repo_path else Path(".")
                 packs = await self._run_stage(
                     run_id, "building_context", "上下文构建",
                     self.config.context_timeout_seconds,

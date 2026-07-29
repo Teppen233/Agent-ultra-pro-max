@@ -81,7 +81,6 @@ async def _load_github(pr_url: str, config: Config) -> PRData:
     token = config.github_token.get_secret_value() if config.github_token else ""
 
     headers = {
-        "Accept": "application/vnd.github.v3+json",
         "User-Agent": "ReviewCrew/0.1",
     }
     if token:
@@ -96,10 +95,16 @@ async def _load_github(pr_url: str, config: Config) -> PRData:
             raise RuntimeError(
                 f"PR 不存在或无权访问: {pr_url}（HTTP 404）"
             )
+        if resp.status_code == 403 and not token:
+            raise RuntimeError(
+                f"GitHub API 限流（HTTP 403）。"
+                f"公开仓库无 Token 每小时仅 60 次请求。"
+                f"建议: 在 .env 中设置 GITHUB_TOKEN，或使用本地仓库模式"
+            )
         if resp.status_code == 403:
             raise RuntimeError(
                 f"GitHub API 限流或权限不足: {pr_url}（HTTP 403）。"
-                f"建议设置 GITHUB_TOKEN 环境变量"
+                f"请检查 GITHUB_TOKEN 是否有效"
             )
         resp.raise_for_status()
         pr_data = resp.json()

@@ -47,21 +47,22 @@ export function connectSSE(
   const url = `${BASE_URL}/reviews/${encodeURIComponent(runId)}/events`
   const es = new EventSource(url)
 
-  es.addEventListener('event', (e: MessageEvent) => {
+  // 监听默认 message 事件（兼容所有 SSE 事件类型）
+  es.onmessage = (e: MessageEvent) => {
     try {
       const data: PipelineEvent = JSON.parse(e.data)
       onEvent(data)
     } catch {
       // 忽略解析错误
     }
-  })
-
-  es.addEventListener('done', () => {
-    es.close()
-    onComplete?.()
-  })
+  }
 
   es.onerror = (e) => {
+    // SSE 在流正常结束时也会触发 onerror，检查 readyState
+    if (es.readyState === EventSource.CLOSED) {
+      onComplete?.()
+      return
+    }
     onError?.(e)
   }
 
@@ -87,24 +88,23 @@ export function replayEvents(
   onError?: (err: Event) => void,
   onComplete?: () => void
 ): EventSource {
-  const url = `${BASE_URL}/reviews/${encodeURIComponent(runId)}/replay?speed=${speed}`
+  const url = `${BASE_URL}/replays/${encodeURIComponent(runId)}/events?speed=${speed}`
   const es = new EventSource(url)
 
-  es.addEventListener('event', (e: MessageEvent) => {
+  es.onmessage = (e: MessageEvent) => {
     try {
       const data: PipelineEvent = JSON.parse(e.data)
       onEvent(data)
     } catch {
       // 忽略解析错误
     }
-  })
-
-  es.addEventListener('done', () => {
-    es.close()
-    onComplete?.()
-  })
+  }
 
   es.onerror = (e) => {
+    if (es.readyState === EventSource.CLOSED) {
+      onComplete?.()
+      return
+    }
     onError?.(e)
   }
 
