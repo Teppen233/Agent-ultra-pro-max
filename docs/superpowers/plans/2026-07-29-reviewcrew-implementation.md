@@ -22,6 +22,10 @@
 - 标识符、类名、字段名、协议枚举和 HTTP 路径使用英文。
 - 日志不得包含 API Key、Authorization Header、完整 Prompt 或敏感仓库全文。
 - 所有外部能力均可降级；单个 Agent、Semgrep、Git 历史或前端断连不得无故摧毁整个运行。
+- 系统采用流式 Agent Team：两个专家、Verifier watcher、工具检索和消息处理在依赖允许时并行运行。
+- TeamLeadAgent 只负责风险路由、分片和预算决策，不直接产生最终 Finding；确定性 Orchestrator 掌握调度和故障恢复。
+- Agent 间通信只能通过类型化 Mailbox 和 Evidence Blackboard，不允许无预算自由对话。
+- Agent Prompt 由共享规则、角色 Prompt、动态 Skill、运行上下文和输出 Schema 组合。
 - 所有测试默认不依赖网络和真实 API Key；真实调用只存在于显式 smoke 命令。
 - 每完成一个可独立验收的任务立即提交，不把多个大能力堆进一个提交。
 - 不提交 `.env`、API Key、`runs/`、Benchmark 仓库副本、构建产物、IDE 文件或模型缓存。
@@ -68,6 +72,8 @@
 8. Benchmark 快速模式能够运行并生成报告；实际运行案例和未准备案例区分清楚。
 9. README 包含安装、配置、CLI、服务端、前端、评测和故障排查方法。
 10. Git 工作区只剩用户原有改动或明确记录的交付产物。
+11. 至少完成一轮“基线评测 → 定向修改 → 相同案例复测 → 邻近案例回归 → 保存迭代版本”的闭环。
+12. `ITERATION_LOG.md` 记录当前 Git SHA、父版本、Prompt/Skill 哈希、案例、命中、误报和耗时。
 
 ### 阻塞与时间裁切
 
@@ -90,6 +96,9 @@ README.md                              中文安装、使用、评测和演示�
 reviewcrew/config.py                   环境配置和时间预算
 reviewcrew/schemas.py                  全局唯一领域模型
 reviewcrew/events.py                   事件写入、订阅和回放
+reviewcrew/team/mailbox.py             类型化收件箱、广播和消息持久化
+reviewcrew/team/blackboard.py          共享证据和 Agent 状态
+reviewcrew/hooks.py                    生命周期 Hook 和安全校验
 reviewcrew/cli.py                      CLI 入口
 reviewcrew/llm/glm.py                  GLM 5.2 模型构建和 smoke
 reviewcrew/github/pr_loader.py          GitHub PR 与本地 Git 加载
@@ -99,11 +108,15 @@ reviewcrew/tools/files.py              安全文件读取
 reviewcrew/tools/search.py             代码、测试和文档搜索
 reviewcrew/tools/git.py                Git log/show/blame
 reviewcrew/tools/semgrep.py            可选静态信号 Provider
+reviewcrew/tools/registry.py           工具权限、预算、超时和输出裁剪
 reviewcrew/agents/base.py              Pydantic AI 公共运行时
+reviewcrew/agents/team_lead.py         TeamLead 主 Agent
 reviewcrew/agents/defect.py            DefectAgent
 reviewcrew/agents/intent.py            IntentAgent
 reviewcrew/agents/verifier.py          VerifierAgent
 reviewcrew/agents/prompts/*.md          中文系统提示词
+reviewcrew/skills/registry.py           Skill 加载、选择和版本哈希
+reviewcrew/skills/**/*.md               共享和角色审查 Skill
 reviewcrew/pipeline/dedupe.py          确定性去重
 reviewcrew/pipeline/orchestrator.py     阶段编排、预算和降级
 reviewcrew/pipeline/report.py           JSON 与 Markdown 报告
@@ -140,6 +153,7 @@ web/src/fixtures/demo-events.jsonl     稳定演示事件
 **Interfaces:**
 - Produces: `Config.from_env() -> Config`
 - Produces: `ReviewRequest`, `PRData`, `ChangedFile`, `DiffHunk`, `CodeEvidence`, `TextEvidence`, `StaticSignal`, `ContextPack`, `Finding`, `Verdict`, `ReviewResult`
+- Produces: `ReviewPlan`, `TeamMessage`, `HandoffRequest`, `VerificationRequest`, `EvidenceResponse`, `AgentSnapshot`
 - Constraint: 字段必须与设计规范第 5 节一致。
 
 - [ ] **Step 1: 创建最小 Python 工程配置**
@@ -191,11 +205,15 @@ git add pyproject.toml .env.example .gitignore reviewcrew tests/test_config.py t
 git commit -m "feat: 定义审查领域模型与工程配置"
 ```
 
-### Task 2: PipelineEvent、事件持久化与 Replay 基础
+### Task 2: PipelineEvent、Mailbox、Blackboard 与 Replay 基础
 
 **Files:**
 - Create: `reviewcrew/events.py`
+- Create: `reviewcrew/team/__init__.py`
+- Create: `reviewcrew/team/mailbox.py`
+- Create: `reviewcrew/team/blackboard.py`
 - Test: `tests/test_events.py`
+- Test: `tests/test_mailbox.py`
 
 **Interfaces:**
 - Consumes: `Config.runs_dir`
@@ -203,6 +221,9 @@ git commit -m "feat: 定义审查领域模型与工程配置"
 - Produces: `EventStore.emit(run_id: str, event_type: EventType, data: dict[str, Any]) -> PipelineEvent`
 - Produces: `EventStore.subscribe(run_id: str) -> AsyncIterator[PipelineEvent]`
 - Produces: `EventStore.read(run_id: str) -> list[PipelineEvent]`
+- Produces: `Mailbox.publish(message: TeamMessage) -> None`
+- Produces: `Mailbox.receive(agent_id: str) -> AsyncIterator[TeamMessage]`
+- Produces: `EvidenceBlackboard.apply(message: TeamMessage) -> None`
 
 - [ ] **Step 1: 写事件顺序和持久化测试**
 
@@ -222,21 +243,37 @@ Run: `pytest tests/test_events.py -v`
 
 Expected: FAIL，因为 `EventStore` 不存在。
 
-- [ ] **Step 3: 实现 JSONL 事件存储和异步订阅**
+- [ ] **Step 3: 写 Mailbox 幂等、过期和路由测试**
 
-每条事件立即刷新到 `runs/{run_id}/events.jsonl`，其中 `{run_id}` 由 `EventStore.create_run()` 生成。日志使用中文，但事件枚举保持英文。订阅者断开时不终止生产者。
+```python
+@pytest.mark.asyncio
+async def test_mailbox_routes_private_message_once(tmp_path):
+    mailbox = Mailbox(tmp_path)
+    message = make_team_message(recipient="verifier", kind="candidate_finding")
+    await mailbox.publish(message)
+    await mailbox.publish(message)
+    received = await anext(mailbox.receive("verifier"))
+    assert received.id == message.id
+    assert mailbox.delivered_count(message.id) == 1
+```
 
-- [ ] **Step 4: 运行测试并确认通过**
+另写测试确认已过期 `verification_request` 不会送达、广播消息可以被订阅角色接收、消息追加到 `mailbox.jsonl`。
 
-Run: `pytest tests/test_events.py -v`
+- [ ] **Step 4: 实现 JSONL 事件存储、Mailbox 和 Blackboard**
+
+每条事件立即刷新到 `runs/{run_id}/events.jsonl`，消息刷新到 `runs/{run_id}/mailbox.jsonl`。Mailbox 使用每 Agent `asyncio.Queue`、广播订阅、消息 ID 幂等集合和 correlation ID。Blackboard 只保存 Context、Signal、Finding、Verdict、Snapshot 和状态，不保存隐藏思维链。
+
+- [ ] **Step 5: 运行测试并确认通过**
+
+Run: `pytest tests/test_events.py tests/test_mailbox.py -v`
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 6: 提交**
 
 ```powershell
-git add reviewcrew/events.py tests/test_events.py
-git commit -m "feat: 实现审查事件存储与订阅"
+git add reviewcrew/events.py reviewcrew/team tests/test_events.py tests/test_mailbox.py
+git commit -m "feat: 实现审查事件与 Agent Mailbox"
 ```
 
 ### Task 3: Unified Diff 解析
@@ -342,6 +379,7 @@ git commit -m "feat: 加载 GitHub 与本地拉取请求"
 - Create: `reviewcrew/tools/search.py`
 - Create: `reviewcrew/tools/git.py`
 - Create: `reviewcrew/tools/semgrep.py`
+- Create: `reviewcrew/tools/registry.py`
 - Create: `reviewcrew/context/__init__.py`
 - Create: `reviewcrew/context/builder.py`
 - Test: `tests/test_tools.py`
@@ -354,6 +392,8 @@ git commit -m "feat: 加载 GitHub 与本地拉取请求"
 - Produces: `git_history(repo: Path, relative_path: str, limit: int = 10) -> list[TextEvidence]`
 - Produces: `git_blame(repo: Path, relative_path: str, start: int, end: int) -> list[TextEvidence]`
 - Produces: `async run_semgrep(repo: Path, files: list[str], timeout: float) -> list[StaticSignal]`
+- Produces: `ToolRegistry.register(definition: ToolDefinition) -> None`
+- Produces: `ToolRegistry.invoke(role: str, name: str, arguments: dict[str, Any], budget: Budget) -> Any`
 - Produces: `async build_context(pr: PRData, repo: Path, config: Config) -> list[ContextPack]`
 
 - [ ] **Step 1: 写路径穿越和范围读取失败测试**
@@ -374,7 +414,7 @@ Run: `pytest tests/test_tools.py tests/test_context_builder.py -v`
 
 - [ ] **Step 4: 实现只读工具**
 
-优先使用 `rg`，不可用时使用 Python 受限文本搜索。所有返回限制条数和字符数。Semgrep 不存在或超时返回空列表并写中文 warning。
+优先使用 `rg`，不可用时使用 Python 受限文本搜索。所有返回限制条数和字符数。Semgrep 不存在或超时返回空列表并写中文 warning。ToolRegistry 在调用前检查角色、仓库路径、剩余预算和参数 Schema，在调用后裁剪输出并触发 Hooks。
 
 - [ ] **Step 5: 实现 Context Builder**
 
@@ -398,14 +438,29 @@ git commit -m "feat: 构建差异中心上下文与只读工具"
 - Create: `reviewcrew/llm/glm.py`
 - Create: `reviewcrew/agents/__init__.py`
 - Create: `reviewcrew/agents/base.py`
+- Create: `reviewcrew/agents/team_lead.py`
+- Create: `reviewcrew/agents/prompts/shared-system.md`
+- Create: `reviewcrew/agents/prompts/team-lead.md`
+- Create: `reviewcrew/hooks.py`
+- Create: `reviewcrew/skills/__init__.py`
+- Create: `reviewcrew/skills/registry.py`
+- Create: `reviewcrew/skills/shared/diff-first-review.md`
+- Create: `reviewcrew/skills/shared/evidence-standard.md`
+- Create: `reviewcrew/skills/team-lead/risk-routing.md`
+- Create: `reviewcrew/skills/team-lead/budget-allocation.md`
 - Test: `tests/test_glm.py`
 - Test: `tests/test_agent_runtime.py`
+- Test: `tests/test_hooks.py`
+- Test: `tests/test_skill_registry.py`
 
 **Interfaces:**
 - Produces: `build_glm_model(config: Config) -> Model`
 - Produces: `class ReviewAgentProtocol(Protocol): async run(context: ContextPack) -> list[Finding]`
 - Produces: `class VerifierProtocol(Protocol): async run(findings: list[Finding], context: list[ContextPack]) -> list[Verdict]`
 - Produces: `AgentRuntime.run_expert(...)` and `AgentRuntime.run_verifier(...)`
+- Produces: `TeamLeadAgent.plan(pr: PRData, contexts: list[ContextPack], budget: Budget) -> ReviewPlan`
+- Produces: `HookManager.run(name: HookName, context: HookContext) -> None`
+- Produces: `SkillRegistry.select(role: str, risks: list[str], budget: Budget) -> list[SkillDefinition]`
 
 - [ ] **Step 1: 写模型构建测试**
 
@@ -415,29 +470,43 @@ git commit -m "feat: 构建差异中心上下文与只读工具"
 
 测试工具调用事件、合法 Finding、校验失败重试和请求数限制。
 
-- [ ] **Step 3: 运行测试并确认失败**
+- [ ] **Step 3: 写 Hook 与 Skill Registry 测试**
 
-Run: `pytest tests/test_glm.py tests/test_agent_runtime.py -v`
+验证角色权限、Skill YAML 元数据、Prompt 组合顺序、版本哈希稳定性、Hook 异常不阻塞主管道，以及安全 Hook 可以拒绝越界路径工具调用。
 
-- [ ] **Step 4: 实现 GLM 模型和 AgentRuntime**
+- [ ] **Step 4: 写 TeamLead 计划测试**
+
+使用 TestModel 返回 ReviewPlan，断言安全相关 diff 同时路由 Defect 和 Intent，大 PR 产生语义分片，预算不足时禁止扩展新分片。TeamLead 不得输出 Finding。
+
+- [ ] **Step 5: 运行测试并确认失败**
+
+Run: `pytest tests/test_glm.py tests/test_agent_runtime.py tests/test_hooks.py tests/test_skill_registry.py -v`
+
+- [ ] **Step 6: 实现 GLM 模型、AgentRuntime、Hooks 和 SkillRegistry**
 
 通过 OpenAI 兼容 Provider 接入；temperature 使用模型支持的最低稳定值。公开日志使用中文，禁止记录完整 Prompt 和响应原文。
 
-- [ ] **Step 5: 实现显式 smoke 命令**
+Prompt 组装顺序固定为共享规则、角色 Prompt、动态 Skill、ReviewPlan/Context/Mailbox、剩余预算和输出 Schema。运行记录保存 Prompt 文件哈希、Skill 名称和版本。
+
+- [ ] **Step 7: 实现 TeamLeadAgent**
+
+TeamLead 只输出 ReviewPlan、分片、角色路由和预算，不直接生成 Finding。实际任务创建、Mailbox 和超时仍由 Orchestrator 控制。
+
+- [ ] **Step 8: 实现显式 smoke 命令**
 
 Run: `python -m reviewcrew.llm.glm --smoke`
 
 无 `GLM_API_KEY` 时输出中文说明并以非零状态退出；有 Key 时要求模型返回固定 Pydantic 对象。
 
-- [ ] **Step 6: 运行离线测试并确认通过**
+- [ ] **Step 9: 运行离线测试并确认通过**
 
-Run: `pytest tests/test_glm.py tests/test_agent_runtime.py -v`
+Run: `pytest tests/test_glm.py tests/test_agent_runtime.py tests/test_hooks.py tests/test_skill_registry.py -v`
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 10: 提交**
 
 ```powershell
-git add reviewcrew/llm reviewcrew/agents/base.py tests/test_glm.py tests/test_agent_runtime.py
-git commit -m "feat: 接入 GLM 5.2 与 Agent 运行时"
+git add reviewcrew/llm reviewcrew/agents/base.py reviewcrew/agents/team_lead.py reviewcrew/agents/prompts/shared-system.md reviewcrew/agents/prompts/team-lead.md reviewcrew/hooks.py reviewcrew/skills tests/test_glm.py tests/test_agent_runtime.py tests/test_hooks.py tests/test_skill_registry.py
+git commit -m "feat: 实现主 Agent、Hooks 与 Skill 运行时"
 ```
 
 ### Task 7: DefectAgent 与 IntentAgent
@@ -447,11 +516,23 @@ git commit -m "feat: 接入 GLM 5.2 与 Agent 运行时"
 - Create: `reviewcrew/agents/intent.py`
 - Create: `reviewcrew/agents/prompts/defect.md`
 - Create: `reviewcrew/agents/prompts/intent.md`
+- Create: `reviewcrew/skills/defect/static-breakage.md`
+- Create: `reviewcrew/skills/defect/trace-untrusted-input.md`
+- Create: `reviewcrew/skills/defect/authorization-ownership.md`
+- Create: `reviewcrew/skills/defect/resource-lifecycle.md`
+- Create: `reviewcrew/skills/defect/async-concurrency.md`
+- Create: `reviewcrew/skills/defect/unbounded-growth.md`
+- Create: `reviewcrew/skills/intent/intent-vs-implementation.md`
+- Create: `reviewcrew/skills/intent/boundary-conditions.md`
+- Create: `reviewcrew/skills/intent/state-machine.md`
+- Create: `reviewcrew/skills/intent/api-contract.md`
+- Create: `reviewcrew/skills/intent/cross-file-consistency.md`
+- Create: `reviewcrew/skills/intent/architecture-boundary.md`
 - Test: `tests/test_expert_agents.py`
 
 **Interfaces:**
-- Produces: `DefectAgent.run(context: ContextPack) -> list[Finding]`
-- Produces: `IntentAgent.run(context: ContextPack) -> list[Finding]`
+- Produces: `DefectAgent.run(context: ContextPack, mailbox: Mailbox, blackboard: EvidenceBlackboard) -> AgentSnapshot`
+- Produces: `IntentAgent.run(context: ContextPack, mailbox: Mailbox, blackboard: EvidenceBlackboard) -> AgentSnapshot`
 - Both implement: `ReviewAgentProtocol`
 
 - [ ] **Step 1: 写 Prompt 合同测试**
@@ -468,7 +549,7 @@ Run: `pytest tests/test_expert_agents.py -v`
 
 - [ ] **Step 4: 实现两个 Agent**
 
-DefectAgent 可访问 Semgrep 信号和只读代码工具；IntentAgent 优先读取 PR 描述、测试、项目文档和相关代码。禁止输出纯风格建议。
+DefectAgent 可访问 Semgrep 信号和只读代码工具；IntentAgent 优先读取 PR 描述、测试、项目文档和相关代码。候选通过 Mailbox 流式发布，两个专家支持最多两次结构化 handoff。禁止输出纯风格建议。
 
 - [ ] **Step 5: 运行测试并确认通过**
 
@@ -488,12 +569,17 @@ git commit -m "feat: 实现缺陷与意图审查 Agent"
 - Create: `reviewcrew/pipeline/dedupe.py`
 - Create: `reviewcrew/agents/verifier.py`
 - Create: `reviewcrew/agents/prompts/verifier.md`
+- Create: `reviewcrew/skills/verifier/reachability-challenge.md`
+- Create: `reviewcrew/skills/verifier/upstream-protection.md`
+- Create: `reviewcrew/skills/verifier/pr-attribution.md`
+- Create: `reviewcrew/skills/verifier/severity-calibration.md`
+- Create: `reviewcrew/skills/verifier/duplicate-check.md`
 - Test: `tests/test_dedupe.py`
 - Test: `tests/test_verifier.py`
 
 **Interfaces:**
 - Produces: `deduplicate_findings(findings: list[Finding]) -> list[Finding]`
-- Produces: `VerifierAgent.run(findings: list[Finding], context: list[ContextPack]) -> list[Verdict]`
+- Produces: `VerifierAgent.watch(mailbox: Mailbox, blackboard: EvidenceBlackboard, budget: Budget) -> list[Verdict]`
 
 - [ ] **Step 1: 写确定性去重测试**
 
@@ -509,7 +595,7 @@ Run: `pytest tests/test_dedupe.py tests/test_verifier.py -v`
 
 - [ ] **Step 4: 实现去重和 Verifier**
 
-Verifier 使用干净上下文，只接收候选结论、代码证据和必要上下文。默认拒绝低于 0.6 的最终置信度，最终最多保留 8 条。
+Verifier watcher 与专家同时启动，候选到达后立即验证。Verifier 使用干净上下文，只接收候选结论、代码证据和必要上下文；每个 Finding 最多发送一次 30 秒定向补证请求。默认拒绝低于 0.6 的最终置信度，最终最多保留 8 条。
 
 - [ ] **Step 5: 运行测试并确认通过**
 
@@ -539,7 +625,7 @@ git commit -m "feat: 验证并去重候选问题"
 
 - [ ] **Step 1: 写 Fake 端到端状态机测试**
 
-断言完整事件顺序、两个专家通过 `asyncio.gather` 并行、Verifier 在去重后运行、报告事件最后发出。
+断言 TeamLead 先产生 ReviewPlan，两个专家、Verifier watcher、静态工具通过 `asyncio.TaskGroup` 并行；Verifier 在第一个候选到达后立即开始，不等待专家完成；报告事件最后发出。
 
 - [ ] **Step 2: 写降级测试**
 
@@ -555,7 +641,7 @@ Run: `pytest tests/test_orchestrator.py tests/test_report.py tests/test_cli.py -
 
 - [ ] **Step 5: 实现 Orchestrator 和报告**
 
-阶段预算使用 `asyncio.timeout`。每个阶段发 `stage.started/completed/failed`。所有结果写入 `runs/{run_id}/result.json` 和 `runs/{run_id}/report.md`。
+阶段预算使用 `asyncio.timeout`。每个阶段发 `stage.started/completed/failed`。Orchestrator 驱动 Mailbox、Blackboard、Hooks 和 TaskGroup；收到 budget warning 时要求 Agent 提交 snapshot。所有结果写入 `runs/{run_id}/result.json` 和 `runs/{run_id}/report.md`。
 
 - [ ] **Step 6: 实现 CLI**
 
@@ -853,23 +939,31 @@ Run: `python -m benchmark.runner --mode quick`
 
 记录 Git SHA、模型、案例、命中、误报和耗时。
 
-- [ ] **Step 2: 开发者 1 调优 DefectAgent**
+- [ ] **Step 2: 为每名开发者创建独立迭代分支**
+
+从同一稳定提交创建个人分支，例如 `feature-1.1.2-mw`、`feature-1.1.2-sxf`、`feature-1.1.2-ly`、`feature-1.1.2-zq`。每人使用团队约定的唯一后缀；创建前确认工作区没有本任务未提交改动，并在 `ITERATION_LOG.md` 记录父 SHA。
+
+- [ ] **Step 3: 开发者 1 调优 DefectAgent**
 
 只修改 Defect Prompt、Semgrep 信号使用和对应测试。优先安全、静态、内存案例。每次有效变化单独提交。
 
-- [ ] **Step 3: 开发者 2 调优 IntentAgent**
+- [ ] **Step 4: 开发者 2 调优 IntentAgent**
 
 只修改 Intent Prompt、相关上下文选择和对应测试。优先业务逻辑、逻辑和架构案例。每次有效变化单独提交。
 
-- [ ] **Step 4: 开发者 3 调优 VerifierAgent**
+- [ ] **Step 5: 开发者 3 调优 VerifierAgent**
 
 只修改 Verifier Prompt、阈值、去重和 Judge 人工复核记录。重点检查 Verifier 误杀。每次有效变化单独提交。
 
-- [ ] **Step 5: 开发者 4 优化前端**
+- [ ] **Step 6: 开发者 4 优化前端**
 
 只优化真实 SSE、Replay、信息层级、Finding 展示、Benchmark 页面和录屏稳定性，不修改公共协议。
 
-- [ ] **Step 6: 10:30 合并最佳调优并回归**
+- [ ] **Step 7: 每条工作线完成评测闭环并保存版本**
+
+每条工作线必须运行目标案例和至少一个邻近案例，记录 Retrieval/Reasoning/Verification/Localization/Runtime 归因、Prompt/Skill 哈希和指标。无收益版本保留在个人分支但不合并。
+
+- [ ] **Step 8: 10:30 合并最佳调优并回归**
 
 Run: `pytest -q`
 
@@ -877,13 +971,13 @@ Run: `npm test -- --run`
 
 Run: `npm run build`
 
-- [ ] **Step 7: 11:00 运行最终快速评测**
+- [ ] **Step 9: 11:00 运行最终快速评测**
 
 Run: `python -m benchmark.runner --mode quick`
 
 只在有时间且 quick 稳定后运行更多 ready 案例。
 
-- [ ] **Step 8: 11:30 冻结代码**
+- [ ] **Step 10: 11:30 冻结代码**
 
 更新评测报告、选择最佳 Replay、检查敏感信息并提交最终代码。北京时间 11:30 冻结，12:00 前完成全部交付检查。
 
@@ -905,9 +999,14 @@ Run: `python -m benchmark.runner --mode quick`
 - [ ] 评测报告不虚报完整 50 案例成绩
 - [ ] `git status --short` 中没有误提交的密钥、缓存、Fork 仓库或 IDE 文件
 - [ ] 所有本任务变更已按能力分批提交
+- [ ] Mailbox 消息幂等、过期、路由和持久化测试通过
+- [ ] Hooks、Tool Registry、Skill Registry 和 Prompt 哈希测试通过
+- [ ] Verifier 在专家未完成时可以流式验证首个候选
+- [ ] 至少保存一个新迭代分支和对应 `ITERATION_LOG.md`
+- [ ] 至少完成一轮评测驱动的修改、复测和邻近案例回归
 
 ## Goal 推荐目标文本
 
 创建 Goal 时使用以下完整目标，避免只写“完成项目”导致范围漂移：
 
-> 严格执行 `docs/superpowers/plans/2026-07-29-reviewcrew-implementation.md`，在北京时间（Asia/Shanghai，UTC+8）2026-07-30 12:00 硬截止前实现并整理好 ReviewCrew 的完整可提交版本。必须先阅读对应设计规范，按 Task 顺序使用测试驱动开发，频繁提交 Git，并在每次续跑时从第一个未完成 checkbox 继续。系统必须包含 GLM 5.2、DefectAgent、IntentAgent、VerifierAgent、PR diff 和上下文工具、600 秒 watchdog、JSON/Markdown 报告、FastAPI REST/SSE/Replay、Vue 3 前端和 Greptile Benchmark quick/case/full 流程。所有代码注释、docstring、TSDoc、运行日志、错误提示和报告正文使用中文；不得保存密钥、完整 Prompt 或隐藏思维链。外部服务失败时先完成 Fake、fixture、Replay 和离线测试并实现明确降级。只有后端测试、前端测试与构建、Fake 端到端、Benchmark Fake quick 和至少一个真实审查完成后才能标记 Goal 完成；若缺少 GLM API Key，必须明确记录真实 smoke 未执行，不得伪造成功。北京时间 11:30 必须冻结代码，12:00 是全部代码、测试、文档和材料的硬截止，12:00 后不安排开发或交付缓冲。
+> 严格执行 `docs/superpowers/plans/2026-07-29-reviewcrew-implementation.md`，在北京时间（Asia/Shanghai，UTC+8）2026-07-30 12:00 硬截止前实现并整理好 ReviewCrew 的完整可提交版本。必须先阅读对应设计规范，按 Task 顺序使用测试驱动开发，频繁提交 Git，并在每次续跑时从第一个未完成 checkbox 继续。系统必须实现流式 Agent Team：TeamLeadAgent 负责风险路由和预算，DefectAgent 与 IntentAgent 并行发现候选，VerifierAgent 通过类型化 Mailbox 在专家尚未完成时流式验证，并支持一次定向补证和结构化跨 Agent 移交。必须包含 Evidence Blackboard、Mailbox 持久化、生命周期 Hooks、Tool Registry、版本化 Skill Registry、组合式中文 Prompt、PR diff 和上下文工具、600 秒 watchdog、JSON/Markdown 报告、FastAPI REST/SSE/Replay、Vue 3 前端和 Greptile Benchmark quick/case/full 流程。所有代码注释、docstring、TSDoc、运行日志、错误提示和报告正文使用中文；不得保存密钥、完整 Prompt 或隐藏思维链。外部服务失败时先完成 Fake、fixture、Replay 和离线测试并实现明确降级。建立可运行基线不代表完成：Goal 必须至少完成一轮“基线评测、失败归因、定向修改、相同案例复测、邻近案例回归、保存新迭代分支和 ITERATION_LOG”的闭环，并在时间允许时持续迭代到连续两轮没有可验证收益或北京时间 11:30。迭代分支使用 `feature-1.1.{iteration}-{owner}` 格式，例如 `feature-1.1.2-mw`；每名开发者使用唯一后缀，不得覆盖他人分支。只有后端测试、前端测试与构建、Mailbox/Hooks/Skills 测试、Fake 端到端、Benchmark Fake quick、至少一个真实审查和至少一轮版本化迭代完成后才能标记 Goal 完成；若缺少 GLM API Key，必须明确记录真实 smoke 未执行，不得伪造成功。北京时间 11:30 必须冻结代码，12:00 是全部代码、测试、文档和材料的硬截止，12:00 后不安排开发或交付缓冲。

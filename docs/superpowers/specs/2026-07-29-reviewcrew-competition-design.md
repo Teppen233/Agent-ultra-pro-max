@@ -80,6 +80,136 @@ Verifier 不主动寻找新问题，只验证候选 Finding：
 
 Verifier 输出接受或拒绝结论，并可修正严重度、置信度和定位。
 
+### 3.4 TeamLead 主 Agent
+
+系统另设一个面向团队协作的 `TeamLeadAgent`。它是主 Agent，不计入三个 Subagent 数量，也不直接判断具体代码缺陷。
+
+TeamLeadAgent 负责：
+
+- 根据 PR diff、文件类型、风险标签和时间预算生成 `ReviewPlan`。
+- 决定 ContextPack 如何分片以及启动多少专家实例。
+- 并行启动 DefectAgent 和 IntentAgent。
+- 将静态信号、上下文和候选 Finding 发布到共享 Evidence Blackboard。
+- 路由 Agent 间的定向移交、Verifier 补证请求和超时降级。
+- 观察剩余预算，要求 Agent 保存快照或提前收敛。
+- 汇总覆盖范围、未完成检查和降级原因。
+
+TeamLeadAgent 不负责：
+
+- 不直接生成最终 Finding。
+- 不覆盖 Verifier 的接受或拒绝结论。
+- 不读取或转发其他 Agent 的隐藏思维链。
+- 不允许 Agent 进行无结构、无预算的自由聊天。
+
+TeamLeadAgent 的 Prompt 必须强调：并行优先、证据优先、预算优先、结构化消息优先。确定性 Orchestrator 仍负责真正的任务调度、队列、超时和持久化；主 Agent 只产生计划和路由决策，避免把系统可靠性建立在一次模型调用上。
+
+### 3.5 流式 Agent Team
+
+Agent Team 不采用 `Defect → Intent → Verifier` 串行链路，而采用流式并行拓扑：
+
+```text
+                       TeamLeadAgent
+                            │
+              ┌─────────────┴─────────────┐
+              ▼                           ▼
+        DefectAgent                  IntentAgent
+              │                           │
+              ├──── 候选 / 证据 / 移交 ───┤
+              ▼                           ▼
+                 Evidence Blackboard
+                       │       ▲
+              候选事件 │       │ 补证请求
+                       ▼       │
+                   VerifierAgent
+                       │
+                       ▼
+                  Final Findings
+```
+
+执行要求：
+
+1. 初始 ContextPack 可用后，DefectAgent、IntentAgent、Verifier watcher 和可选静态工具同时启动。
+2. 专家每产生一个候选就立即发布，Verifier 不等待全部专家结束。
+3. Verifier 可向原专家发起一次定向补证请求。
+4. 专家可以向另一专家发起结构化跨领域移交，但每个 ContextPack 最多两次。
+5. 大 PR 可以为同一角色启动多个分片实例，角色种类不增加。
+6. 所有消息进入持久化 Mailbox，并同步转化为 PipelineEvent。
+
+### 3.6 Mailbox 与 Evidence Blackboard
+
+每个运行拥有独立的 Mailbox。第一版使用进程内 `asyncio.Queue`，同时将消息追加保存到 `runs/{run_id}/mailbox.jsonl`。接口保持可替换，后续可以切换 Redis Streams，而不修改 Agent 实现。
+
+统一消息外壳：
+
+```python
+class TeamMessage(BaseModel):
+    id: str
+    run_id: str
+    sequence: int
+    timestamp: datetime
+    sender: str
+    recipient: str
+    kind: MessageKind
+    correlation_id: str | None
+    expires_at: datetime | None
+    payload: dict[str, Any]
+```
+
+`MessageKind` 固定包含：
+
+- `review_plan`
+- `context_available`
+- `static_signal`
+- `candidate_finding`
+- `handoff_request`
+- `handoff_response`
+- `verification_request`
+- `evidence_response`
+- `verdict`
+- `agent_snapshot`
+- `agent_completed`
+- `agent_failed`
+- `budget_warning`
+- `cancel`
+
+关键载荷：
+
+```python
+class HandoffRequest(BaseModel):
+    source_agent: str
+    target_agent: Literal["defect", "intent"]
+    hypothesis: str
+    file: str
+    lines: list[int]
+    requested_check: str
+    evidence: list[CodeEvidence]
+
+
+class VerificationRequest(BaseModel):
+    finding_id: str
+    target_agent: Literal["defect", "intent"]
+    question: str
+    required_evidence: list[str]
+    deadline_seconds: int = 30
+
+
+class EvidenceResponse(BaseModel):
+    finding_id: str
+    conclusion: Literal["supported", "withdrawn", "uncertain"]
+    evidence: list[CodeEvidence]
+    summary: str
+```
+
+Mailbox 规则：
+
+- 每个 Agent 只有自己的收件队列和共享广播订阅，不得读取无关私信。
+- 消息必须有唯一 ID、单调 sequence 和可选 correlation ID。
+- 重复消息按 ID 幂等处理。
+- 过期补证请求不得继续消耗模型预算。
+- Agent 退出前必须发送 `agent_completed` 或 `agent_failed`。
+- Orchestrator 负责死信、超时、取消和最终队列关闭。
+- Blackboard 只保存结构化事实、证据和状态，不保存隐藏思维链。
+
 ## 4. 系统组件与数据流
 
 ```text
@@ -345,6 +475,93 @@ SSE 与 Replay 必须输出相同的 PipelineEvent，前端不得为两种模式
 
 知识库方案以仓库现有文档、测试、配置和 Git 历史为第一版知识源。README 中必须说明后续可在 PR 合并时增量更新符号索引、架构摘要和历史缺陷模式，但不得宣称未实现的离线系统已经可用。
 
+### 8.4 Tool Registry 与权限
+
+所有 Agent 工具通过统一 `ToolRegistry` 注册，工具元数据至少包含名称、中文说明、允许角色、超时、单次输出上限、是否需要外部程序和失败降级方式。
+
+| 工具 | 允许角色 | 主要用途 | 默认限制 |
+|---|---|---|---|
+| `read_file_range` | 全部 | 读取代码证据 | 单次最多 300 行 |
+| `search_code` | 全部 | 搜索符号和文本 | 最多 20 个结果 |
+| `find_related_tests` | Defect、Intent | 查找相关测试 | 最多 10 个文件 |
+| `search_project_docs` | Intent、TeamLead | 查找 README、设计和规范 | 最多 10 个片段 |
+| `git_show` | 全部 | 查看提交修改 | 只读 |
+| `git_history` | 全部 | 获取相关历史 | 最多 10 个提交 |
+| `git_blame` | 全部 | 获取修改原因线索 | 单次最多 100 行 |
+| `run_semgrep` | Defect | 定向扫描修改文件 | 默认 60 秒 |
+| `get_diff_context` | 全部 | 获取目标 hunk 周边 | 单次最多 200 行 |
+| `request_handoff` | Defect、Intent | 跨领域移交 | 每 Pack 最多 2 次 |
+| `request_evidence` | Verifier | 请求定向补证 | 每 Finding 最多 1 次 |
+| `submit_snapshot` | 全部 Agent | 保存当前结果 | 每个 Agent 至少一次 |
+
+工具调用必须经过以下校验：仓库路径白名单、角色权限、剩余预算、参数 Schema、输出裁剪和敏感信息过滤。
+
+### 8.5 Hooks
+
+框架提供确定性的生命周期 Hooks，支持日志、事件、指标、预算和后续调优，不允许 Hook 修改模型结论本身。
+
+必须实现：
+
+- `before_run`：创建 run、记录版本、加载配置和 Prompt 哈希。
+- `after_run`：写结果、覆盖率、耗时和降级摘要。
+- `before_stage` / `after_stage` / `on_stage_error`：阶段事件和耗时。
+- `before_agent` / `after_agent` / `on_agent_error`：Agent 状态和快照。
+- `before_model_request` / `after_model_response`：用量、延迟和响应 Schema 状态；不得记录完整 Prompt。
+- `before_tool` / `after_tool` / `on_tool_error`：权限、超时、输出大小和中文日志。
+- `before_publish_message` / `after_receive_message`：Mailbox 指标和消息追踪。
+- `before_accept_finding`：执行修改行、证据、置信度和敏感信息确定性校验。
+- `on_budget_warning`：剩余 120 秒和 30 秒时要求 Agent 保存快照并收敛。
+
+Hook 失败只能记录告警，不得遮蔽原始异常或阻塞主管道；安全校验 Hook 除外，安全校验失败必须拒绝相应工具调用或 Finding。
+
+### 8.6 Agent Skills
+
+这里的 Skill 是 ReviewCrew 内部可组合的审查方法模块，不是无约束 Prompt 文本。每个 Skill 使用 Markdown 加 YAML front matter 保存：
+
+```yaml
+name: trace-untrusted-input
+version: 1.0.0
+roles: [defect]
+categories: [security]
+required_tools: [search_code, read_file_range]
+max_tool_calls: 4
+```
+
+每个 Skill 正文必须定义：适用条件、检查步骤、需要收集的证据、停止条件、常见误报和输出要求。
+
+第一版 Skill 清单：
+
+- 共享：`diff-first-review`、`evidence-standard`、`changed-line-localization`、`stop-when-insufficient`。
+- Defect：`static-breakage`、`trace-untrusted-input`、`authorization-ownership`、`resource-lifecycle`、`async-concurrency`、`unbounded-growth`。
+- Intent：`intent-vs-implementation`、`boundary-conditions`、`state-machine`、`api-contract`、`cross-file-consistency`、`architecture-boundary`。
+- Verifier：`reachability-challenge`、`upstream-protection`、`pr-attribution`、`severity-calibration`、`duplicate-check`。
+- TeamLead：`risk-routing`、`semantic-sharding`、`budget-allocation`、`coverage-summary`。
+
+`SkillRegistry` 根据角色、风险标签、语言、修改类型和剩余预算选择 Skill。Prompt 中必须记录启用的 Skill 名称和版本，运行结果中保存 Skill 列表，便于赛马比较。
+
+### 8.7 Prompt 结构
+
+每个 Agent Prompt 由以下部分组合，禁止复制成一个难以比较的超长字符串：
+
+1. `shared/system.md`：角色边界、中文输出、证据标准、禁止隐藏思维链。
+2. `team_lead.md`、`defect.md`、`intent.md`、`verifier.md`：角色目标和消息协议。
+3. 动态 Skill：按本次风险选择的方法模块。
+4. 当前 ReviewPlan、ContextPack、Mailbox 消息和剩余预算。
+5. 严格结构化输出 Schema。
+
+主 Agent Prompt 的关键指令：
+
+- 默认并行启动可以独立工作的任务。
+- 不等待完整上下文才启动专家，允许增量补充。
+- 不直接裁决缺陷。
+- 优先把假设路由给最适合的专家。
+- 每次路由都设置预算和截止时间。
+- 剩余预算不足时停止扩展，要求保存快照。
+
+专家 Prompt 的关键指令：先形成可证伪假设，再调用工具收集证据；证据不足时撤回或输出 uncertain，不得为了数量制造 Finding。
+
+Verifier Prompt 的关键指令：默认尝试推翻候选；若缺少关键证据，优先发一次定向补证请求，而不是直接赞同专家。
+
 ## 9. 时间预算与降级策略
 
 | 阶段 | 时间上限 |
@@ -482,6 +699,51 @@ reviewcrew/
 8. Benchmark 实际命中效果。
 9. 单 PR 是否能在 600 秒内收敛。
 10. 代码结构是否便于次日上午专项调优。
+
+### 13.1 分支与版本保存
+
+每名开发者使用自己的后缀，分支格式：
+
+```text
+feature-1.1.<iteration>-<owner>
+```
+
+示例：
+
+- `feature-1.1.2-mw`
+- `feature-1.1.2-sxf`
+- `feature-1.1.2-ly`
+- `feature-1.1.2-zq`
+
+`owner` 由团队自行确定，不能多人共用同一后缀。`iteration` 在形成可复现的新基线时递增，不要求每个小提交都新建分支。
+
+版本保存规则：
+
+1. 当前稳定基线保留在原分支，不直接用实验覆盖。
+2. 开始一轮可能显著改变 Prompt、编排或检索策略的实验前，从最近通过验证的提交创建新迭代分支。
+3. 每个分支保存 `benchmark/results/ITERATION_LOG.md`，记录父版本、Prompt/Skill 哈希、配置、测试案例和指标。
+4. 只将测试通过且指标更好、或明确修复阻断缺陷的版本候选合并到最终分支。
+5. 不使用 `git reset --hard`、强推或覆盖他人分支。
+6. 分支切换前必须提交或明确保留当前工作，禁止携带不相关脏文件参加比较。
+7. 每个可演示版本保存对应 run ID、报告和 Replay；大型运行文件不进入 Git时，在迭代日志中记录其本地路径和生成命令。
+
+### 13.2 迭代循环
+
+Goal 和人工调优都必须重复以下循环，而不是实现一次就结束：
+
+```text
+建立可运行基线
+  → 运行自动测试
+  → 运行 Benchmark quick/指定案例
+  → 将失败归因为 Retrieval / Reasoning / Verification / Localization / Runtime
+  → 只修改对应层
+  → 再次运行相同案例防止误判
+  → 运行邻近案例检查回归
+  → 保存指标、Prompt/Skill 哈希和 Git 版本
+  → 有收益则保留，无收益则不合并
+```
+
+在北京时间允许的情况下持续迭代。满足基本功能只代表基线建立完成，不代表 Goal 完成。Goal 至少完成一轮“基线评测 → 修改 → 复测 → 保存版本”的闭环；若时间允许，应持续到连续两轮没有可验证收益或到达 11:30 冻结时间。
 
 ## 14. 次日上午调优分工
 
