@@ -37,8 +37,9 @@ cases:
     fork_repo: ai-code-review-evaluation/cal.com-greptile
     test_pr: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/2
     source_fix_pr: null
-    base_sha: null
-    head_sha: null
+    # 已通过 GitHub PR API 核验测试 PR 的 base/head；不等同于上游引入/修复提交。
+    base_sha: bff28e5d6fef42b4e7c036c688f0bad4410b42a2
+    head_sha: e043a5efd872362a3fc146ed0d9ce4393e316c1e
     introducing_commit: null
     fixing_commit: null
     bug_locations: []
@@ -59,8 +60,9 @@ cases:
     fork_repo: ai-code-review-evaluation/grafana-greptile
     test_pr: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/1
     source_fix_pr: null
-    base_sha: null
-    head_sha: null
+    # 已通过 GitHub PR API 核验测试 PR 的 base/head；不等同于上游引入/修复提交。
+    base_sha: ed865831071a0c0a63c75ad0cfa6661107dabcaf
+    head_sha: 3647ba7360b8d157e4a294a650a365b6aca070d8
     introducing_commit: null
     fixing_commit: null
     bug_locations: []
@@ -81,8 +83,9 @@ cases:
     fork_repo: ai-code-review-evaluation/keycloak-greptile
     test_pr: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1
     source_fix_pr: null
-    base_sha: null
-    head_sha: null
+    # 已通过 GitHub PR API 核验测试 PR 的 base/head；不等同于上游引入/修复提交。
+    base_sha: 30f804af450dec523909a52f2a4b97302d27f5cc
+    head_sha: 3214b188de808fdb0fff335556b686f1b0a63218
     introducing_commit: null
     fixing_commit: null
     bug_locations: []
@@ -103,8 +106,9 @@ cases:
     fork_repo: ai-code-review-evaluation/discourse-greptile
     test_pr: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/1
     source_fix_pr: null
-    base_sha: null
-    head_sha: null
+    # 已通过 GitHub PR API 核验测试 PR 的 base/head；不等同于上游引入/修复提交。
+    base_sha: 3f71fa15c93bb0b751bb92abae1b5dc9a21bd4ca
+    head_sha: ffbaf8c54269df2ce510de91245760fddce09896
     introducing_commit: null
     fixing_commit: null
     bug_locations: []
