@@ -294,6 +294,14 @@ class HandoffRequest(BaseModel):
     evidence: list[CodeEvidence] = Field(default_factory=list)
 
 
+class HandoffAssessment(BaseModel):
+    """专家对定向移交执行复查后可公开的结构化结论。"""
+
+    conclusion: Literal["supported", "unsupported", "insufficient"]
+    reason: str = Field(min_length=1)
+    evidence: list[CodeEvidence] = Field(default_factory=list)
+
+
 class VerificationRequest(BaseModel):
     """Verifier 向原专家发出的补证请求。"""
 

@@ -3,6 +3,7 @@
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic_ai.models.test import TestModel
@@ -41,45 +42,96 @@ def make_context(*, sample_rate: bool = False) -> ContextPack:
     )
 
 
+def make_snapshot_output(*, category: str, line: int, title: str) -> dict[str, Any]:
+    """构造专家初审阶段的结构化输出。"""
+
+    return {
+        "agent_id": "fake",
+        "findings": [
+            {
+                "id": f"finding-{category}",
+                "producer": "defect",
+                "category": category,
+                "severity": "high",
+                "confidence": 0.9,
+                "file": "src/service.py",
+                "line_start": line,
+                "line_end": line,
+                "title": title,
+                "description": "变更后的行为会在可达输入下产生错误结果。",
+                "trigger_condition": "外部输入触发该分支。",
+                "impact": "请求可能失败或返回错误结果。",
+                "reasoning_summary": "候选问题直接位于变更行。",
+                "evidence": [
+                    {
+                        "source": "diff",
+                        "file": "src/service.py",
+                        "start_line": line,
+                        "end_line": line,
+                        "description": "变更行缺少必要约束。",
+                        "content": "changed line",
+                    }
+                ],
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        ],
+        "completed_checks": ["合同测试"],
+        "pending_checks": [],
+        "warnings": [],
+    }
+
+
 def make_model(*, category: str, line: int, title: str) -> TestModel:
     """构造返回单个候选问题的 Pydantic AI 假模型。"""
 
-    return TestModel(
-        custom_output_args={
-            "agent_id": "fake",
-            "findings": [
-                {
-                    "id": f"finding-{category}",
-                    "producer": "defect",
-                    "category": category,
-                    "severity": "high",
-                    "confidence": 0.9,
-                    "file": "src/service.py",
-                    "line_start": line,
-                    "line_end": line,
-                    "title": title,
-                    "description": "变更后的行为会在可达输入下产生错误结果。",
-                    "trigger_condition": "外部输入触发该分支。",
-                    "impact": "请求可能失败或返回错误结果。",
-                    "reasoning_summary": "候选问题直接位于变更行。",
-                    "evidence": [
-                        {
-                            "source": "diff",
-                            "file": "src/service.py",
-                            "start_line": line,
-                            "end_line": line,
-                            "description": "变更行缺少必要约束。",
-                            "content": "changed line",
-                        }
-                    ],
-                    "created_at": datetime.now(UTC).isoformat(),
-                }
-            ],
-            "completed_checks": ["合同测试"],
-            "pending_checks": [],
-            "warnings": [],
-        }
-    )
+    return TestModel(custom_output_args=make_snapshot_output(category=category, line=line, title=title))
+
+
+def make_handoff_assessment(conclusion: str, reason: str) -> dict[str, Any]:
+    """构造定向复查阶段的公开结构化结论。"""
+
+    return {
+        "conclusion": conclusion,
+        "reason": reason,
+        "evidence": [
+            {
+                "source": "diff",
+                "file": "src/service.py",
+                "start_line": 10,
+                "end_line": 10,
+                "description": "目标修改行直接拼接外部输入。",
+                "content": '+ query = "SELECT * FROM users WHERE id = " + user_id',
+            }
+        ],
+    }
+
+
+class SequencedStructuredModel(TestModel):
+    """按请求顺序返回专家快照与定向复查结果。"""
+
+    def __init__(self, *outputs: dict[str, Any]) -> None:
+        super().__init__(custom_output_args=outputs[0])
+        self.outputs = outputs
+        self.request_calls = 0
+
+    async def request(self, messages, model_settings, model_request_parameters):  # type: ignore[no-untyped-def]
+        self.custom_output_args = self.outputs[min(self.request_calls, len(self.outputs) - 1)]
+        self.request_calls += 1
+        return await super().request(messages, model_settings, model_request_parameters)
+
+
+class CandidateBarrierPublisher:
+    """在候选真实发布后唤醒并发请求生产者。"""
+
+    def __init__(self, delegate: MessagePublisher) -> None:
+        self.delegate = delegate
+        self.candidate_published = asyncio.Event()
+
+    async def publish(self, **kwargs) -> bool:  # type: ignore[no-untyped-def]
+        published = await self.delegate.publish(**kwargs)
+        if published and kwargs["kind"] == "candidate_finding":
+            self.candidate_published.set()
+        return published
 
 
 def test_expert_prompts_cover_required_review_dimensions() -> None:
@@ -186,16 +238,161 @@ async def test_expert_responds_to_structured_handoff_and_evidence_request(tmp_pa
         )
     )
 
+    runtime = AgentRuntime()
+    model = SequencedStructuredModel(
+        make_snapshot_output(category="security", line=10, title="SQL 拼接可注入"),
+        make_handoff_assessment("supported", "目标行直接拼接外部输入，支持注入风险假设。"),
+    )
     await DefectAgent(
-        model=make_model(category="security", line=10, title="SQL 拼接可注入"),
-        runtime=AgentRuntime(),
+        model=model,
+        runtime=runtime,
         collaboration_window_seconds=0.01,
     ).run(make_context(), mailbox=mailbox, blackboard=blackboard, budget=Budget(seconds=60))
 
-    assert blackboard.by_kind("handoff_response")[0].correlation_id == "handoff-correlation"
+    handoff = blackboard.by_kind("handoff_response")[0]
+    assert handoff.correlation_id == "handoff-correlation"
+    assert handoff.payload["conclusion"] == "supported"
+    assert handoff.payload["reason"] == "目标行直接拼接外部输入，支持注入风险假设。"
+    assert runtime.request_count == 2
+    assert [record.output_schema for record in runtime.run_records] == ["AgentSnapshot", "HandoffAssessment"]
     response = blackboard.by_kind("evidence_response")[0]
     assert response.correlation_id == "finding-security"
     assert response.payload["conclusion"] == "supported"
+
+
+@pytest.mark.asyncio
+async def test_handoff_recheck_distinguishes_opposite_hypotheses_on_same_line(tmp_path) -> None:
+    """同一目标行上的相反假设必须经过复查并得到不同结论。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    mailbox = Mailbox(tmp_path, "run-opposite")
+    blackboard = EvidenceBlackboard("run-opposite")
+    now = datetime.now(UTC)
+    for sequence, hypothesis in enumerate(("该行存在 SQL 注入。", "该行不存在 SQL 注入。"), start=1):
+        blackboard.apply(
+            TeamMessage(
+                id=f"handoff-opposite-{sequence}",
+                run_id="run-opposite",
+                sequence=sequence,
+                timestamp=now,
+                sender="intent:ctx-sql",
+                recipient="defect:ctx-sql",
+                kind="handoff_request",
+                payload={
+                    "source_agent": "intent:ctx-sql",
+                    "target_agent": "defect",
+                    "hypothesis": hypothesis,
+                    "file": "src/service.py",
+                    "lines": [10],
+                    "requested_check": "检查 user_id 是否未经参数化直接进入 SQL。",
+                    "evidence": [],
+                },
+            )
+        )
+    runtime = AgentRuntime()
+    model = SequencedStructuredModel(
+        make_snapshot_output(category="security", line=10, title="SQL 拼接可注入"),
+        make_handoff_assessment("supported", "拼接外部输入支持存在注入风险。"),
+        make_handoff_assessment("unsupported", "同一证据与不存在注入风险的假设相矛盾。"),
+    )
+
+    await DefectAgent(model=model, runtime=runtime, collaboration_window_seconds=0.01).run(
+        make_context(), mailbox=mailbox, blackboard=blackboard, budget=Budget(seconds=60, max_requests=3)
+    )
+
+    responses = blackboard.by_kind("handoff_response")
+    assert [item.payload["conclusion"] for item in responses] == ["supported", "unsupported"]
+    assert runtime.request_count == 3
+
+
+@pytest.mark.asyncio
+async def test_handoff_returns_insufficient_when_shared_request_budget_is_exhausted(tmp_path) -> None:
+    """共享请求预算只够初审时，移交必须降级并快速收敛。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    mailbox = Mailbox(tmp_path, "run-budget")
+    blackboard = EvidenceBlackboard("run-budget")
+    blackboard.apply(
+        TeamMessage(
+            id="handoff-budget",
+            run_id="run-budget",
+            sequence=1,
+            timestamp=datetime.now(UTC),
+            sender="intent:ctx-sql",
+            recipient="defect:ctx-sql",
+            kind="handoff_request",
+            payload={
+                "source_agent": "intent:ctx-sql",
+                "target_agent": "defect",
+                "hypothesis": "该行存在 SQL 注入。",
+                "file": "src/service.py",
+                "lines": [10],
+                "requested_check": "检查 user_id 是否未经参数化直接进入 SQL。",
+                "evidence": [],
+            },
+        )
+    )
+    runtime = AgentRuntime()
+
+    await DefectAgent(
+        model=make_model(category="security", line=10, title="SQL 拼接可注入"),
+        runtime=runtime,
+        collaboration_window_seconds=0.01,
+    ).run(make_context(), mailbox=mailbox, blackboard=blackboard, budget=Budget(seconds=1, max_requests=1))
+
+    response = blackboard.by_kind("handoff_response")[0]
+    assert response.payload["conclusion"] == "insufficient"
+    assert "预算" in response.payload["reason"]
+    assert runtime.request_count == 1
+    assert blackboard.by_kind("agent_completed")
+
+
+@pytest.mark.asyncio
+async def test_default_collaboration_deadline_handles_handoff_arriving_after_candidate(tmp_path) -> None:
+    """候选发布后的真实迟到移交仍须在共享绝对截止时间内处理。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    mailbox = Mailbox(tmp_path, "run-late")
+    blackboard = EvidenceBlackboard("run-late")
+    delegate = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    publisher = CandidateBarrierPublisher(delegate)
+    runtime = AgentRuntime()
+    model = SequencedStructuredModel(
+        make_snapshot_output(category="security", line=10, title="SQL 拼接可注入"),
+        make_handoff_assessment("supported", "目标行直接拼接外部输入。"),
+    )
+
+    async def publish_late_handoff() -> None:
+        await publisher.candidate_published.wait()
+        await asyncio.sleep(0.30)
+        await delegate.publish(
+            sender="intent:ctx-sql",
+            recipient="defect:ctx-sql",
+            kind="handoff_request",
+            key="late-handoff",
+            payload={
+                "source_agent": "intent:ctx-sql",
+                "target_agent": "defect",
+                "hypothesis": "该行存在 SQL 注入。",
+                "file": "src/service.py",
+                "lines": [10],
+                "requested_check": "检查 user_id 是否未经参数化直接进入 SQL。",
+                "evidence": [],
+            },
+        )
+
+    producer = asyncio.create_task(publish_late_handoff())
+    await DefectAgent(model=model, runtime=runtime, publisher=publisher).run(
+        make_context(), mailbox=mailbox, blackboard=blackboard, budget=Budget(seconds=1, max_requests=2)
+    )
+    await producer
+
+    response = blackboard.by_kind("handoff_response")[0]
+    assert response.payload["conclusion"] == "supported"
+    assert response.correlation_id == "intent:ctx-sql:late-handoff"
 
 
 @pytest.mark.asyncio

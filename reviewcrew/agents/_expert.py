@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import asyncio
-from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Literal
 
@@ -18,6 +18,7 @@ from reviewcrew.schemas import (
     ContextPack,
     EvidenceResponse,
     Finding,
+    HandoffAssessment,
     HandoffRequest,
     ReviewPlan,
     TeamMessage,
@@ -30,7 +31,6 @@ from reviewcrew.team.publisher import MessagePublisher
 
 
 Role = Literal["defect", "intent"]
-_MAX_COLLABORATION_SECONDS = 0.25
 
 
 class ExpertAgent:
@@ -82,8 +82,12 @@ class ExpertAgent:
             snapshot = await self._review(context, agent_id, effective_budget)
             snapshot = self._normalize_snapshot(snapshot, context, agent_id)
             await self._publish_findings(snapshot, context, publisher)
-            await self._respond_to_requests(snapshot, context, mailbox, blackboard, publisher)
-            await self._consume_collaboration_window(snapshot, context, mailbox, publisher, deadline)
+            await self._respond_to_requests(
+                snapshot, context, mailbox, blackboard, publisher, effective_budget, deadline
+            )
+            await self._consume_collaboration_window(
+                snapshot, context, mailbox, publisher, effective_budget, deadline
+            )
             await self._publish(
                 context,
                 publisher,
@@ -184,6 +188,8 @@ class ExpertAgent:
         mailbox: Mailbox | None,
         blackboard: EvidenceBlackboard | None,
         publisher: MessagePublisher | None,
+        budget: Budget,
+        deadline: float,
     ) -> None:
         """处理至多两项结构化移交，并对定向补证请求给出结构化响应。"""
 
@@ -196,12 +202,7 @@ class ExpertAgent:
                 if request.target_agent != self.role:
                     continue
                 self._handled_handoffs.add(message.id)
-                evidence = [
-                    {"source": "diff", "file": hunk.file, "start_line": line, "end_line": line, "description": "定向检查命中的修改行。", "content": hunk.content}
-                    for hunk in context.diff_hunks if hunk.file == request.file
-                    for line in hunk.changed_lines if line in request.lines
-                ]
-                conclusion = "supported" if evidence and request.requested_check.strip() else "insufficient"
+                assessment = await self._assess_handoff(request, context, budget, deadline)
                 await self._publish(
                     context,
                     publisher,
@@ -214,8 +215,9 @@ class ExpertAgent:
                         "context_id": context.id,
                         "hypothesis": request.hypothesis,
                         "requested_check": request.requested_check,
-                        "conclusion": conclusion,
-                        "evidence": evidence,
+                        "conclusion": assessment.conclusion,
+                        "reason": assessment.reason,
+                        "evidence": [item.model_dump(mode="json") for item in assessment.evidence],
                     },
                     correlation_id=message.correlation_id or message.id,
                 )
@@ -241,15 +243,98 @@ class ExpertAgent:
                     correlation_id=message.correlation_id or request.finding_id,
                 )
 
-    async def _consume_collaboration_window(self, snapshot: AgentSnapshot, context: ContextPack, mailbox: Mailbox | None, publisher: MessagePublisher | None, deadline: float) -> None:
+    async def _assess_handoff(
+        self,
+        request: HandoffRequest,
+        context: ContextPack,
+        budget: Budget,
+        deadline: float,
+    ) -> HandoffAssessment:
+        """在共享请求和时间预算内执行一次仅面向目标行的结构化复查。"""
+
+        target_evidence = [
+            {
+                "source": "diff",
+                "file": hunk.file,
+                "start_line": line,
+                "end_line": line,
+                "description": "定向检查命中的修改行。",
+                "content": hunk.content,
+            }
+            for hunk in context.diff_hunks
+            if hunk.file == request.file
+            for line in hunk.changed_lines
+            if line in request.lines
+        ]
+        if not target_evidence:
+            return HandoffAssessment(conclusion="insufficient", reason="目标修改行没有可验证证据。")
+        if self._model is None:
+            return HandoffAssessment(conclusion="insufficient", reason="未配置可执行定向复查的模型。")
+        request_budget = self._runtime.budget or budget
+        if request_budget.remaining_requests <= 0:
+            return HandoffAssessment(conclusion="insufficient", reason="共享模型请求预算不足，无法执行定向复查。")
+        remaining_seconds = deadline - asyncio.get_running_loop().time()
+        if remaining_seconds <= 0:
+            return HandoffAssessment(conclusion="insufficient", reason="共享时间预算不足，无法执行定向复查。")
+
+        dynamic_context = json.dumps(
+            {
+                "task": "仅执行 requested_check，判断目标行证据是否支持 hypothesis；不得扩展为完整代码审查。",
+                "hypothesis": request.hypothesis,
+                "requested_check": request.requested_check,
+                "target": {"file": request.file, "lines": request.lines},
+                "target_line_evidence": target_evidence,
+            },
+            ensure_ascii=False,
+        )
+        try:
+            async with asyncio.timeout(remaining_seconds):
+                assessment = await self._runtime.run_structured(
+                    self._model,
+                    role=self.role,
+                    sources=[
+                        PromptSource("shared-system", Path(__file__).parent / "prompts" / "shared-system.md")
+                    ],
+                    skills=[],
+                    dynamic_context=dynamic_context,
+                    budget=budget,
+                    output_type=HandoffAssessment,
+                    tools=self._tools,
+                )
+        except TimeoutError:
+            return HandoffAssessment(conclusion="insufficient", reason="定向复查超过共享时间预算。")
+        except Exception:
+            return HandoffAssessment(conclusion="insufficient", reason="定向复查未能生成有效的结构化结论。")
+
+        requested_lines = set(request.lines)
+        verified_evidence = [
+            item
+            for item in assessment.evidence
+            if item.source == "diff"
+            and item.file == request.file
+            and any(item.start_line <= line <= item.end_line for line in requested_lines)
+        ]
+        if assessment.conclusion != "insufficient" and not verified_evidence:
+            return HandoffAssessment(conclusion="insufficient", reason="定向复查结论缺少目标修改行证据。")
+        return assessment.model_copy(update={"evidence": verified_evidence})
+
+    async def _consume_collaboration_window(
+        self,
+        snapshot: AgentSnapshot,
+        context: ContextPack,
+        mailbox: Mailbox | None,
+        publisher: MessagePublisher | None,
+        budget: Budget,
+        deadline: float,
+    ) -> None:
         """在明确且有界的窗口内处理候选发布后到达的定向请求。"""
 
         if mailbox is None:
             return
         mailbox.register(snapshot.agent_id)
         loop = asyncio.get_running_loop()
-        window = self._collaboration_window_seconds if self._collaboration_window_seconds is not None else _MAX_COLLABORATION_SECONDS
-        deadline = min(deadline, loop.time() + window)
+        if self._collaboration_window_seconds is not None:
+            deadline = min(deadline, loop.time() + self._collaboration_window_seconds)
         while loop.time() < deadline and (len(self._handled_handoffs) < 2 or not self._handled_evidence):
             try:
                 message = await mailbox.receive_one(snapshot.agent_id, timeout=max(0.0, deadline - loop.time()))
@@ -258,7 +343,7 @@ class ExpertAgent:
             if message.kind not in {"handoff_request", "verification_request"}:
                 continue
             board = EvidenceBlackboard(message.run_id, messages=[message])
-            await self._respond_to_requests(snapshot, context, mailbox, board, publisher)
+            await self._respond_to_requests(snapshot, context, mailbox, board, publisher, budget, deadline)
 
     async def _publish(
         self,
