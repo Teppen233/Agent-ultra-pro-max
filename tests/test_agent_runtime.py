@@ -1,5 +1,6 @@
 """Agent 运行时与 Team Lead 的结构化输出测试。"""
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -135,6 +136,22 @@ class RecoveringStructuredOutputModel(TestModel):
         return await super().request(messages, model_settings, model_request_parameters)
 
 
+class ReservationBarrierModel(TestModel):
+    """占住一次真实模型调用，供并发预算测试建立屏障。"""
+
+    def __init__(self) -> None:
+        super().__init__(custom_output_args={"summary": "屏障完成", "budget_seconds": 1})
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.request_calls = 0
+
+    async def request(self, messages, model_settings, model_request_parameters):  # type: ignore[no-untyped-def]
+        self.request_calls += 1
+        self.started.set()
+        await self.release.wait()
+        return await super().request(messages, model_settings, model_request_parameters)
+
+
 @pytest.mark.asyncio
 async def test_runtime_returns_valid_structured_expert_and_verifier_outputs() -> None:
     """运行时接受合法结构化结果并交给校验器。"""
@@ -264,6 +281,59 @@ async def test_runtime_enforces_request_limit() -> None:
     await runtime.run_expert(Expert(), make_context())
 
     assert runtime.request_count == 0
+
+
+@pytest.mark.asyncio
+async def test_shared_budget_reserves_request_before_parallel_model_call(tmp_path) -> None:
+    """共享预算只剩一次请求时，并发 Runtime 不得都进入模型。"""
+
+    shared = tmp_path / "shared.md"
+    role_prompt = tmp_path / "role.md"
+    shared.write_text("共享规则", encoding="utf-8")
+    role_prompt.write_text("角色提示", encoding="utf-8")
+    sources = [PromptSource("shared", shared), PromptSource("role", role_prompt)]
+    budget = Budget(seconds=60, max_requests=1)
+    first_model = ReservationBarrierModel()
+    first_runtime = AgentRuntime(config=Config(llm_max_retries=0))
+    second_model = TestModel(custom_output_args={"summary": "不应执行", "budget_seconds": 1})
+    second_runtime = AgentRuntime(config=Config(llm_max_retries=0))
+    first_task = asyncio.create_task(
+        first_runtime.run_structured(
+            first_model,
+            role="defect",
+            sources=sources,
+            skills=[],
+            dynamic_context="第一个并发调用",
+            budget=budget,
+            output_type=ReviewPlan,
+        )
+    )
+    await asyncio.wait_for(first_model.started.wait(), timeout=0.5)
+
+    second_error: BaseException | None = None
+    try:
+        await second_runtime.run_structured(
+            second_model,
+            role="verifier",
+            sources=sources,
+            skills=[],
+            dynamic_context="第二个并发调用",
+            budget=budget,
+            output_type=ReviewPlan,
+        )
+    except BaseException as error:
+        second_error = error
+    finally:
+        first_model.release.set()
+    result = (await asyncio.gather(first_task, return_exceptions=True))[0]
+
+    assert isinstance(second_error, RuntimeError)
+    assert "预算上限" in str(second_error)
+    assert isinstance(result, ReviewPlan)
+    assert result.summary == "屏障完成"
+    assert first_model.request_calls == 1
+    assert second_runtime.request_count == 0
+    assert budget.requests_used == 1
 
 
 def test_budget_is_a_shared_schema_contract() -> None:

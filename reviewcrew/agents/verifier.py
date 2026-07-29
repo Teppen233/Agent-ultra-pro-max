@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 from typing import Any, Sequence
@@ -12,11 +13,23 @@ from pydantic_ai.models import Model
 
 from reviewcrew.agents.base import AgentRuntime, PromptSource
 from reviewcrew.config import Config
-from reviewcrew.schemas import Budget, EvidenceResponse, Finding, TeamMessage, Verdict, VerificationRequest
+from reviewcrew.schemas import (
+    Budget,
+    CodeEvidence,
+    EvidenceResponse,
+    Finding,
+    TeamMessage,
+    Verdict,
+    VerificationRequest,
+)
 from reviewcrew.skills.registry import SkillRegistry
 from reviewcrew.team.blackboard import EvidenceBlackboard
 from reviewcrew.team.mailbox import Mailbox
 from reviewcrew.team.publisher import MessagePublisher
+
+
+class _VerifierDeadlineExceeded(TimeoutError):
+    """表示模型调用已耗尽 watcher 的绝对时间预算。"""
 
 
 class VerifierAgent:
@@ -50,53 +63,77 @@ class VerifierAgent:
         mailbox: Mailbox,
         blackboard: EvidenceBlackboard,
         budget: Budget,
+        *,
+        expected_agent_ids: set[str] | None = None,
+        stop_event: asyncio.Event | None = None,
     ) -> list[Verdict]:
-        """监听候选消息，立即验证并在专家终态或预算截止时收敛。"""
+        """监听候选消息，并按实例终态、显式停止或预算截止收敛。"""
 
         mailbox.register("verifier")
         publisher = self._publisher or MessagePublisher(mailbox=mailbox, blackboard=blackboard)
         loop = asyncio.get_running_loop()
         deadline = loop.time() + budget.seconds
         deferred: deque[TeamMessage] = deque()
-        seen_candidates: set[str] = set()
-        terminal_roles = self._terminal_roles(blackboard.messages)
+        seen_finding_ids: set[str] = set()
+        expected = None if expected_agent_ids is None else set(expected_agent_ids)
+        terminal_agent_ids = self._terminal_agent_ids(blackboard.messages)
         verdicts: list[Verdict] = []
         accepted_count = 0
         timed_out = False
         try:
             for message in tuple(blackboard.by_kind("candidate_finding")):
                 deferred.append(message)
-            while terminal_roles != {"defect", "intent"} or deferred:
+            while not self._should_stop(expected, terminal_agent_ids, stop_event, deferred):
                 remaining = deadline - loop.time()
                 if remaining <= 0:
                     timed_out = True
                     break
                 try:
-                    message = deferred.popleft() if deferred else await mailbox.receive_one("verifier", timeout=remaining)
+                    message = (
+                        deferred.popleft()
+                        if deferred
+                        else await self._receive_or_stop(mailbox, stop_event, remaining)
+                    )
                 except TimeoutError:
                     timed_out = True
+                    break
+                if message is None:
                     break
                 if message.kind == "cancel":
                     await self._publish_terminal(publisher, failed=True, warning="Verifier 收到取消消息。")
                     return verdicts
-                role = self._terminal_role(message)
-                if role is not None:
-                    terminal_roles.add(role)
+                terminal_agent_id = self._terminal_agent_id(message)
+                if terminal_agent_id is not None:
+                    terminal_agent_ids.add(terminal_agent_id)
                     continue
-                if message.kind != "candidate_finding" or message.id in seen_candidates:
+                if message.kind != "candidate_finding":
                     continue
-                seen_candidates.add(message.id)
                 finding = Finding.model_validate(message.payload["finding"])
-                verdict = await self._verify_candidate(
-                    finding,
-                    message,
-                    mailbox,
-                    blackboard,
-                    publisher,
-                    budget,
-                    deadline,
-                    deferred,
-                )
+                if finding.id in seen_finding_ids:
+                    continue
+                seen_finding_ids.add(finding.id)
+                try:
+                    verdict = await self._verify_candidate(
+                        finding,
+                        message,
+                        mailbox,
+                        blackboard,
+                        publisher,
+                        budget,
+                        deadline,
+                        deferred,
+                    )
+                except _VerifierDeadlineExceeded:
+                    timed_out = True
+                    verdict = Verdict(
+                        finding_id=finding.id,
+                        accepted=False,
+                        verdict="insufficient_evidence",
+                        confidence=0.0,
+                        severity=None,
+                        reason="Verifier 模型调用超过共享时间预算，候选未发布。",
+                        final_finding=None,
+                    )
                 if verdict.accepted:
                     if accepted_count >= self._max_findings:
                         verdict = Verdict(
@@ -119,6 +156,8 @@ class VerifierAgent:
                     payload={"verdict": verdict.model_dump(mode="json")},
                     correlation_id=finding.id,
                 )
+                if timed_out:
+                    break
             await self._publish_terminal(
                 publisher,
                 failed=False,
@@ -145,7 +184,14 @@ class VerifierAgent:
     ) -> Verdict:
         """执行首次反证检查，并在证据不足时最多补证一次。"""
 
-        first = await self._model_verdict(finding, budget, evidence_response=None)
+        verification_context = self._verification_context(candidate_message)
+        first = await self._model_verdict(
+            finding,
+            budget,
+            watch_deadline=watch_deadline,
+            verification_context=verification_context,
+            evidence_response=None,
+        )
         if first.verdict != "insufficient_evidence" or self._model is None:
             return self._normalize_verdict(first, finding)
         response = await self._request_evidence(
@@ -169,14 +215,25 @@ class VerifierAgent:
                 reason=response.summary,
                 final_finding=None,
             )
-        second = await self._model_verdict(finding, budget, evidence_response=response)
-        return self._normalize_verdict(second, finding)
+        enriched_finding = finding.model_copy(
+            update={"evidence": self._merge_evidence(finding.evidence, response.evidence)}
+        )
+        second = await self._model_verdict(
+            enriched_finding,
+            budget,
+            watch_deadline=watch_deadline,
+            verification_context=verification_context,
+            evidence_response=response,
+        )
+        return self._normalize_verdict(second, enriched_finding)
 
     async def _model_verdict(
         self,
         finding: Finding,
         budget: Budget,
         *,
+        watch_deadline: float,
+        verification_context: list[CodeEvidence],
         evidence_response: EvidenceResponse | None,
     ) -> Verdict:
         """只向模型提供公开候选、代码证据和一次可选补证。"""
@@ -193,22 +250,29 @@ class VerifierAgent:
         dynamic_context = {
             "task": "尝试推翻该候选；只验证现有结论，不主动寻找新问题。",
             "candidate": finding.model_dump(mode="json"),
+            "necessary_context": [item.model_dump(mode="json") for item in verification_context],
             "evidence_response": None if evidence_response is None else evidence_response.model_dump(mode="json"),
         }
+        remaining = watch_deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise _VerifierDeadlineExceeded
         try:
-            return await self._runtime.run_structured(
-                self._model,
-                role="verifier",
-                sources=[
-                    PromptSource("shared-system", Path(__file__).parent / "prompts" / "shared-system.md"),
-                    PromptSource("verifier", Path(__file__).parent / "prompts" / "verifier.md"),
-                ],
-                skills=registry.select("verifier", [finding.category, "general"], budget),
-                dynamic_context=json.dumps(dynamic_context, ensure_ascii=False),
-                budget=budget,
-                output_type=Verdict,
-                tools=self._tools,
-            )
+            async with asyncio.timeout(remaining):
+                return await self._runtime.run_structured(
+                    self._model,
+                    role="verifier",
+                    sources=[
+                        PromptSource("shared-system", Path(__file__).parent / "prompts" / "shared-system.md"),
+                        PromptSource("verifier", Path(__file__).parent / "prompts" / "verifier.md"),
+                    ],
+                    skills=registry.select("verifier", [finding.category, "general"], budget),
+                    dynamic_context=json.dumps(dynamic_context, ensure_ascii=False),
+                    budget=budget,
+                    output_type=Verdict,
+                    tools=self._tools,
+                )
+        except TimeoutError as error:
+            raise _VerifierDeadlineExceeded from error
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -232,12 +296,22 @@ class VerifierAgent:
     ) -> EvidenceResponse | None:
         """发送一次定向补证请求，并只消费关联响应。"""
 
+        loop = asyncio.get_running_loop()
+        available_seconds = min(
+            self._evidence_deadline_seconds,
+            max(0.0, watch_deadline - loop.time()),
+        )
+        deadline_seconds = min(30, int(available_seconds))
+        if deadline_seconds <= 0:
+            return None
+        response_deadline = loop.time() + deadline_seconds
+        expires_at = datetime.now(UTC) + timedelta(seconds=deadline_seconds)
         request = VerificationRequest(
             finding_id=finding.id,
             target_agent=finding.producer,
             question="请补充触发路径、上游保护和当前 PR 归因所需的结构化证据。",
             required_evidence=["触发入口", "修改行", "上游保护", "PR 归因"],
-            deadline_seconds=30,
+            deadline_seconds=deadline_seconds,
         )
         await publisher.publish(
             sender="verifier",
@@ -246,12 +320,11 @@ class VerifierAgent:
             key=f"verification:{finding.id}",
             payload=request.model_dump(mode="json"),
             correlation_id=finding.id,
+            expires_at=expires_at,
         )
         existing = self._find_evidence_response(blackboard.messages, finding.id)
         if existing is not None:
             return existing
-        loop = asyncio.get_running_loop()
-        response_deadline = min(watch_deadline, loop.time() + self._evidence_deadline_seconds)
         while loop.time() < response_deadline:
             try:
                 message = await mailbox.receive_one("verifier", timeout=response_deadline - loop.time())
@@ -314,25 +387,110 @@ class VerifierAgent:
         )
 
     @staticmethod
-    def _terminal_role(message: TeamMessage) -> str | None:
-        """从专家终态中提取冻结角色名。"""
+    def _terminal_agent_id(message: TeamMessage) -> str | None:
+        """从专家终态中提取完整实例标识。"""
 
         if message.kind not in {"agent_completed", "agent_failed"}:
             return None
-        role = message.payload.get("role")
-        return role if role in {"defect", "intent"} else None
+        agent_id = message.payload.get("agent_id")
+        return agent_id if isinstance(agent_id, str) and agent_id else message.sender
 
     @classmethod
-    def _terminal_roles(cls, messages: list[TeamMessage]) -> set[str]:
-        """收集 watcher 启动前已经出现的专家终态。"""
+    def _terminal_agent_ids(cls, messages: list[TeamMessage]) -> set[str]:
+        """收集 watcher 启动前已经出现的实例终态。"""
 
-        return {role for message in messages if (role := cls._terminal_role(message)) is not None}
+        return {
+            agent_id
+            for message in messages
+            if (agent_id := cls._terminal_agent_id(message)) is not None
+        }
+
+    @staticmethod
+    def _should_stop(
+        expected_agent_ids: set[str] | None,
+        terminal_agent_ids: set[str],
+        stop_event: asyncio.Event | None,
+        deferred: deque[TeamMessage],
+    ) -> bool:
+        """判断实例终态或显式停止是否已满足，且无延后消息待处理。"""
+
+        if deferred:
+            return False
+        if expected_agent_ids is not None and expected_agent_ids.issubset(terminal_agent_ids):
+            return True
+        return stop_event is not None and stop_event.is_set()
+
+    @staticmethod
+    async def _receive_or_stop(
+        mailbox: Mailbox,
+        stop_event: asyncio.Event | None,
+        timeout: float,
+    ) -> TeamMessage | None:
+        """等待下一条消息，同时允许调用方显式停止 watcher。"""
+
+        if stop_event is None:
+            return await mailbox.receive_one("verifier", timeout=timeout)
+        receive_task = asyncio.create_task(mailbox.receive_one("verifier"))
+        stop_task = asyncio.create_task(stop_event.wait())
+        done, pending = await asyncio.wait(
+            {receive_task, stop_task},
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if not done:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            raise TimeoutError
+        if receive_task in done:
+            stop_task.cancel()
+            await asyncio.gather(stop_task, return_exceptions=True)
+            return receive_task.result()
+        receive_task.cancel()
+        await asyncio.gather(receive_task, return_exceptions=True)
+        return None
 
     @staticmethod
     def _matches_finding(message: TeamMessage, finding_id: str) -> bool:
         """判断补证响应是否属于当前候选。"""
 
         return message.correlation_id == finding_id or message.payload.get("finding_id") == finding_id
+
+    @staticmethod
+    def _merge_evidence(
+        original: list[CodeEvidence],
+        supplemental: list[CodeEvidence],
+    ) -> list[CodeEvidence]:
+        """按完整结构键确定性合并原始证据与补证证据。"""
+
+        by_key = {
+            (
+                item.source,
+                item.file,
+                item.start_line,
+                item.end_line,
+                item.description,
+                item.content,
+                item.content_hash or "",
+            ): item
+            for item in [*original, *supplemental]
+        }
+        return [by_key[key] for key in sorted(by_key)]
+
+    @classmethod
+    def _verification_context(cls, message: TeamMessage) -> list[CodeEvidence]:
+        """只接收候选载荷中显式允许的类型化必要上下文。"""
+
+        validated: list[CodeEvidence] = []
+        raw_context = message.payload.get("verification_context", [])
+        if not isinstance(raw_context, list):
+            return validated
+        for item in raw_context[:12]:
+            try:
+                validated.append(CodeEvidence.model_validate(item))
+            except (TypeError, ValueError):
+                continue
+        return cls._merge_evidence([], validated)
 
     @classmethod
     def _find_evidence_response(

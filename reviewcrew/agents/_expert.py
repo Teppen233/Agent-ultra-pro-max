@@ -49,6 +49,7 @@ class ExpertAgent:
         tools: Sequence[Any] = (),
         publisher: MessagePublisher | None = None,
         collaboration_window_seconds: float | None = None,
+        max_evidence_requests: int = 8,
     ) -> None:
         self.role = role
         self._model = model
@@ -58,6 +59,9 @@ class ExpertAgent:
         self._tools = tuple(tools)
         self._publisher = publisher
         self._collaboration_window_seconds = collaboration_window_seconds
+        if max_evidence_requests <= 0:
+            raise ValueError("补证请求总量上限必须大于零")
+        self._max_evidence_requests = max_evidence_requests
         self._handled_handoffs: set[str] = set()
         self._handled_evidence: set[str] = set()
 
@@ -221,11 +225,15 @@ class ExpertAgent:
                     },
                     correlation_id=message.correlation_id or message.id,
                 )
-            if message.kind == "verification_request" and not self._handled_evidence:
+            if message.kind == "verification_request":
                 request = VerificationRequest.model_validate(message.payload)
                 if request.target_agent != self.role:
                     continue
-                self._handled_evidence.add(message.id)
+                if request.finding_id in self._handled_evidence:
+                    continue
+                if len(self._handled_evidence) >= self._max_evidence_requests:
+                    continue
+                self._handled_evidence.add(request.finding_id)
                 finding = next((item for item in snapshot.findings if item.id == request.finding_id), None)
                 response = EvidenceResponse(
                     finding_id=request.finding_id,
@@ -238,7 +246,7 @@ class ExpertAgent:
                     publisher,
                     kind="evidence_response",
                     recipient="verifier",
-                    key=f"evidence:{message.id}",
+                    key=f"evidence:{request.finding_id}",
                     payload=response.model_dump(mode="json"),
                     correlation_id=message.correlation_id or request.finding_id,
                 )
@@ -335,7 +343,10 @@ class ExpertAgent:
         loop = asyncio.get_running_loop()
         if self._collaboration_window_seconds is not None:
             deadline = min(deadline, loop.time() + self._collaboration_window_seconds)
-        while loop.time() < deadline and (len(self._handled_handoffs) < 2 or not self._handled_evidence):
+        while loop.time() < deadline and (
+            len(self._handled_handoffs) < 2
+            or len(self._handled_evidence) < self._max_evidence_requests
+        ):
             try:
                 message = await mailbox.receive_one(snapshot.agent_id, timeout=max(0.0, deadline - loop.time()))
             except TimeoutError:

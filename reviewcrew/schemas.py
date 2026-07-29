@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from threading import Lock
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 
 class ReviewRequest(BaseModel):
@@ -217,12 +218,14 @@ class Budget(BaseModel):
     seconds: int = Field(gt=0)
     max_requests: int = Field(default=8, gt=0)
     requests_used: int = Field(default=0, ge=0)
+    _request_lock: Lock = PrivateAttr(default_factory=Lock)
 
     @property
     def remaining_requests(self) -> int:
         """返回剩余的模型请求数量。"""
 
-        return self.max_requests - self.requests_used
+        with self._request_lock:
+            return self.max_requests - self.requests_used
 
     @property
     def can_expand_shards(self) -> bool:
@@ -233,9 +236,30 @@ class Budget(BaseModel):
     def consume_request(self) -> None:
         """消耗一次模型请求，超限时拒绝执行。"""
 
-        if self.remaining_requests <= 0:
-            raise RuntimeError("模型请求数已达到预算上限")
-        self.requests_used += 1
+        self.reserve_requests(1)
+
+    def reserve_requests(self, maximum: int) -> int:
+        """在模型调用前原子预留不超过指定数量的请求额度。"""
+
+        if maximum <= 0:
+            raise ValueError("模型请求预留数量必须大于零")
+        with self._request_lock:
+            available = self.max_requests - self.requests_used
+            if available <= 0:
+                raise RuntimeError("模型请求数已达到预算上限")
+            reserved = min(maximum, available)
+            self.requests_used += reserved
+            return reserved
+
+    def release_requests(self, count: int) -> None:
+        """释放模型调用未实际使用的预留额度。"""
+
+        if count < 0:
+            raise ValueError("模型请求释放数量不能小于零")
+        with self._request_lock:
+            if count > self.requests_used:
+                raise RuntimeError("释放的模型请求额度超过已预留数量")
+            self.requests_used -= count
 
 
 class ReviewPlan(BaseModel):

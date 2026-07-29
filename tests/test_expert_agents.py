@@ -261,6 +261,63 @@ async def test_expert_responds_to_structured_handoff_and_evidence_request(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_expert_answers_each_finding_once_up_to_evidence_request_limit(tmp_path) -> None:
+    """专家按 Finding 去重补证请求，并遵守单分片总响应上限。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    mailbox = Mailbox(tmp_path, "run-evidence-limit")
+    blackboard = EvidenceBlackboard("run-evidence-limit")
+    now = datetime.now(UTC)
+    requested_ids = ["finding-security", "finding-security-2", "finding-security", "finding-security-3"]
+    for sequence, finding_id in enumerate(requested_ids, start=1):
+        blackboard.apply(
+            TeamMessage(
+                id=f"evidence-limit-{sequence}",
+                run_id="run-evidence-limit",
+                sequence=sequence,
+                timestamp=now,
+                sender="verifier",
+                recipient="defect:ctx-sql",
+                kind="verification_request",
+                correlation_id=finding_id,
+                payload={
+                    "finding_id": finding_id,
+                    "target_agent": "defect",
+                    "question": "补充当前候选的修改行证据。",
+                    "required_evidence": ["diff"],
+                    "deadline_seconds": 30,
+                },
+            )
+        )
+    output = make_snapshot_output(category="security", line=10, title="SQL 拼接可注入")
+    template = output["findings"][0]
+    output["findings"].extend(
+        [
+            {**template, "id": "finding-security-2", "title": "第二个候选"},
+            {**template, "id": "finding-security-3", "title": "第三个候选"},
+        ]
+    )
+
+    await DefectAgent(
+        model=TestModel(custom_output_args=output),
+        collaboration_window_seconds=0.01,
+        max_evidence_requests=2,
+    ).run(
+        make_context(),
+        mailbox=mailbox,
+        blackboard=blackboard,
+        budget=Budget(seconds=1, max_requests=1),
+    )
+
+    responses = blackboard.by_kind("evidence_response")
+    assert [item.payload["finding_id"] for item in responses] == [
+        "finding-security",
+        "finding-security-2",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_handoff_recheck_distinguishes_opposite_hypotheses_on_same_line(tmp_path) -> None:
     """同一目标行上的相反假设必须经过复查并得到不同结论。"""
 

@@ -25,6 +25,7 @@ class IntentAgent(ExpertAgent, ReviewAgentProtocol):
         tools: tuple[Any, ...] = (),
         collaboration_window_seconds: float | None = None,
         publisher: MessagePublisher | None = None,
+        max_evidence_requests: int = 8,
     ) -> None:
         super().__init__(
             role="intent",
@@ -35,6 +36,7 @@ class IntentAgent(ExpertAgent, ReviewAgentProtocol):
             tools=tools,
             collaboration_window_seconds=collaboration_window_seconds,
             publisher=publisher,
+            max_evidence_requests=max_evidence_requests,
         )
 
     def _checks(self) -> list[str]:

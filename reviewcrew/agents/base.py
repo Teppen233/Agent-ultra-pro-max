@@ -147,24 +147,26 @@ class AgentRuntime:
             model_name=model.model_name,
         )
         effective_budget = self.budget or budget
-        if effective_budget.remaining_requests <= 0:
-            raise RuntimeError("模型请求数已达到预算上限")
+        reserved_requests = effective_budget.reserve_requests(self.config.llm_max_retries + 1)
         usage = RunUsage()
         agent = Agent(model, output_type=output_type, retries=self.config.llm_max_retries, tools=tools)
-        if self.hook_manager is not None:
-            await self.hook_manager.run("before_agent", HookContext(role=role))
+        agent_run_started = False
         try:
+            if self.hook_manager is not None:
+                await self.hook_manager.run("before_agent", HookContext(role=role))
+            agent_run_started = True
             result = await agent.run(
                 prompt,
                 usage=usage,
-                usage_limits=UsageLimits(request_limit=effective_budget.remaining_requests),
+                usage_limits=UsageLimits(request_limit=reserved_requests),
                 event_stream_handler=self._tool_event_handler(role) if self.event_sink is not None else None,
             )
         except UsageLimitExceeded as error:
             raise RuntimeError("模型请求数已达到预算上限") from error
         finally:
-            for _ in range(usage.requests):
-                self._consume_request(budget)
+            actual_requests = min(usage.requests, reserved_requests) if agent_run_started else 0
+            effective_budget.release_requests(reserved_requests - actual_requests)
+            self._request_count += actual_requests
         if self.hook_manager is not None:
             await self.hook_manager.run("after_agent", HookContext(role=role))
         return result.output

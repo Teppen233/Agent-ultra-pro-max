@@ -44,12 +44,27 @@ class MessagePublisher:
         else:
             self.allocator = self._allocators.setdefault(run_id, SequenceAllocator(initial))
 
-    async def publish(self, *, sender: str, recipient: str, kind: str, key: str, payload: dict[str, Any], correlation_id: str | None = None) -> bool:
+    async def publish(
+        self,
+        *,
+        sender: str,
+        recipient: str,
+        kind: str,
+        key: str,
+        payload: dict[str, Any],
+        correlation_id: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> bool:
         """以单一分配点构造、投递并记录一条安全结构化消息。"""
 
         message = TeamMessage(
             id=f"{sender}:{key}", run_id=self.run_id, sequence=await self.allocator.allocate(), timestamp=datetime.now(UTC),
-            sender=sender, recipient=recipient, kind=kind, correlation_id=correlation_id, payload=payload,
+            sender=sender,
+            recipient=recipient,
+            kind=kind,
+            correlation_id=correlation_id,
+            expires_at=expires_at,
+            payload=payload,
         )
         if self.mailbox is not None and not await self.mailbox.publish(message):
             return False

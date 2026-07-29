@@ -15,6 +15,9 @@ from reviewcrew.team.mailbox import Mailbox
 from reviewcrew.team.publisher import MessagePublisher
 
 
+EXPECTED_EXPERTS = {"defect:ctx-sql", "intent:ctx-sql"}
+
+
 def make_finding(finding_id: str, *, confidence: float = 0.9) -> Finding:
     """构造 Verifier 所需的最小公开候选。"""
 
@@ -80,11 +83,48 @@ class SequencedVerdictModel(TestModel):
         return await super().request(messages, model_settings, model_request_parameters)
 
 
+class BlockingVerdictModel(TestModel):
+    """进入真实模型请求后等待取消，用于验证绝对截止。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            custom_output_args=make_verdict(
+                accepted=True,
+                verdict="confirmed",
+                confidence=0.9,
+                reason="不应在截止后返回。",
+            )
+        )
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def request(self, messages, model_settings, model_request_parameters):  # type: ignore[no-untyped-def]
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.cancelled.set()
+        return await super().request(messages, model_settings, model_request_parameters)
+
+
+class RecordingVerdictModel(TestModel):
+    """记录实际模型输入，以验证必要上下文和审计脱敏边界。"""
+
+    def __init__(self, output: dict[str, Any]) -> None:
+        super().__init__(custom_output_args=output)
+        self.recorded_inputs: list[str] = []
+
+    async def request(self, messages, model_settings, model_request_parameters):  # type: ignore[no-untyped-def]
+        self.recorded_inputs.append(repr(messages))
+        return await super().request(messages, model_settings, model_request_parameters)
+
+
 async def publish_candidate(
     publisher: MessagePublisher,
     finding: Finding,
     *,
     sender: str = "defect:ctx-sql",
+    verification_context: list[dict[str, Any]] | None = None,
 ) -> None:
     """通过真实发布桥接发送候选。"""
 
@@ -93,7 +133,11 @@ async def publish_candidate(
         recipient="verifier",
         kind="candidate_finding",
         key=f"candidate:{finding.id}",
-        payload={"finding": finding.model_dump(mode="json"), "context_id": "ctx-sql"},
+        payload={
+            "finding": finding.model_dump(mode="json"),
+            "context_id": "ctx-sql",
+            "verification_context": verification_context or [],
+        },
         correlation_id=finding.id,
     )
 
@@ -135,7 +179,12 @@ async def test_watch_rejects_candidate_with_upstream_validation_as_false_positiv
         )
     )
     watcher = asyncio.create_task(
-        VerifierAgent(model=model).watch(mailbox, blackboard, Budget(seconds=2))
+        VerifierAgent(model=model).watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2),
+            expected_agent_ids=EXPECTED_EXPERTS,
+        )
     )
     await asyncio.sleep(0)
 
@@ -147,6 +196,84 @@ async def test_watch_rejects_candidate_with_upstream_validation_as_false_positiv
     assert verdicts[0].accepted is False
     assert verdicts[0].verdict == "false_positive"
     assert verdicts[0].final_finding is None
+
+
+@pytest.mark.asyncio
+async def test_watch_model_input_consumes_typed_protection_and_reachability_context(tmp_path) -> None:
+    """Verifier 模型输入必须消费场景证据，而审计与消息不得落完整 Prompt。"""
+
+    scenarios = [
+        (
+            "upstream",
+            "上游仅允许数字 user_id，非法输入在调用前返回。",
+            make_verdict(
+                accepted=False,
+                verdict="false_positive",
+                confidence=0.95,
+                reason="上游保护覆盖触发输入。",
+            ),
+        ),
+        (
+            "reachable",
+            "公开路由把未经校验的 user_id 传入修改行。",
+            make_verdict(
+                accepted=True,
+                verdict="confirmed",
+                confidence=0.9,
+                reason="外部入口可达修改行。",
+            ),
+        ),
+    ]
+    recorded: dict[str, str] = {}
+    for name, description, output in scenarios:
+        run_id = f"run-input-{name}"
+        mailbox = Mailbox(tmp_path, run_id)
+        blackboard = EvidenceBlackboard(run_id)
+        publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+        runtime = AgentRuntime()
+        model = RecordingVerdictModel(output)
+        watcher = asyncio.create_task(
+            VerifierAgent(model=model, runtime=runtime).watch(
+                mailbox,
+                blackboard,
+                Budget(seconds=2),
+                expected_agent_ids={"defect:ctx-sql"},
+            )
+        )
+        await asyncio.sleep(0)
+        await publish_candidate(
+            publisher,
+            make_finding("finding-input"),
+            verification_context=[
+                {
+                    "source": "read_file_range",
+                    "file": "src/service.py",
+                    "start_line": 1,
+                    "end_line": 8,
+                    "description": description,
+                    "content": "def route(user_id): ...",
+                }
+            ],
+        )
+        await publisher.publish(
+            sender="defect:ctx-sql",
+            recipient="*",
+            kind="agent_completed",
+            key="completed",
+            payload={"agent_id": "defect:ctx-sql", "role": "defect"},
+        )
+        await watcher
+
+        recorded[name] = model.recorded_inputs[0]
+        assert description not in repr(runtime.run_records)
+        persisted = (tmp_path / run_id / "mailbox.jsonl").read_text(encoding="utf-8")
+        assert "你是 ReviewCrew 的代码审查系统" not in persisted
+        assert "model_request_parameters" not in persisted
+
+    assert scenarios[0][1] in recorded["upstream"]
+    assert scenarios[1][1] not in recorded["upstream"]
+    assert scenarios[1][1] in recorded["reachable"]
+    assert scenarios[0][1] not in recorded["reachable"]
 
 
 @pytest.mark.asyncio
@@ -165,7 +292,12 @@ async def test_watch_confirms_reachable_candidate_before_experts_finish(tmp_path
         )
     )
     watcher = asyncio.create_task(
-        VerifierAgent(model=model).watch(mailbox, blackboard, Budget(seconds=2))
+        VerifierAgent(model=model).watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2),
+            expected_agent_ids=EXPECTED_EXPERTS,
+        )
     )
     await asyncio.sleep(0)
 
@@ -206,8 +338,11 @@ async def test_watch_requests_evidence_once_and_consumes_response_before_deadlin
         ),
     )
     watcher = asyncio.create_task(
-        VerifierAgent(model=model, runtime=runtime, evidence_deadline_seconds=0.5).watch(
-            mailbox, blackboard, Budget(seconds=2, max_requests=2)
+        VerifierAgent(model=model, runtime=runtime, evidence_deadline_seconds=1).watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2, max_requests=2),
+            expected_agent_ids=EXPECTED_EXPERTS,
         )
     )
     await asyncio.sleep(0)
@@ -215,6 +350,9 @@ async def test_watch_requests_evidence_once_and_consumes_response_before_deadlin
 
     request = await mailbox.receive_one("defect:ctx-sql", timeout=1)
     assert request.kind == "verification_request"
+    assert request.payload["deadline_seconds"] == 1
+    assert request.expires_at is not None
+    assert 0.8 <= (request.expires_at - request.timestamp).total_seconds() <= 1.0
     await publisher.publish(
         sender="defect:ctx-sql",
         recipient="verifier",
@@ -224,7 +362,17 @@ async def test_watch_requests_evidence_once_and_consumes_response_before_deadlin
         payload={
             "finding_id": "finding-needs-evidence",
             "conclusion": "supported",
-            "evidence": [make_finding("evidence-holder").evidence[0].model_dump(mode="json")],
+            "evidence": [
+                make_finding("evidence-holder").evidence[0].model_dump(mode="json"),
+                {
+                    "source": "search_code",
+                    "file": "src/service.py",
+                    "start_line": 5,
+                    "end_line": 5,
+                    "description": "公开入口把 user_id 直接传入查询函数。",
+                    "content": "return find_user(request.path_params['user_id'])",
+                },
+            ],
             "summary": "调用入口将未校验的 user_id 传入修改行。",
         },
     )
@@ -234,6 +382,11 @@ async def test_watch_requests_evidence_once_and_consumes_response_before_deadlin
     assert len(blackboard.by_kind("verification_request")) == 1
     assert runtime.request_count == 2
     assert verdicts[0].verdict == "confirmed"
+    assert verdicts[0].final_finding is not None
+    assert [(item.source, item.start_line) for item in verdicts[0].final_finding.evidence] == [
+        ("diff", 10),
+        ("search_code", 5),
+    ]
 
 
 @pytest.mark.asyncio
@@ -252,7 +405,12 @@ async def test_watch_rejects_final_confidence_below_threshold(tmp_path) -> None:
         )
     )
     watcher = asyncio.create_task(
-        VerifierAgent(model=model).watch(mailbox, blackboard, Budget(seconds=2))
+        VerifierAgent(model=model).watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2),
+            expected_agent_ids=EXPECTED_EXPERTS,
+        )
     )
     await asyncio.sleep(0)
 
@@ -281,7 +439,12 @@ async def test_watch_keeps_at_most_eight_accepted_findings(tmp_path) -> None:
         )
     )
     watcher = asyncio.create_task(
-        VerifierAgent(model=model).watch(mailbox, blackboard, Budget(seconds=3, max_requests=9))
+        VerifierAgent(model=model).watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=3, max_requests=9),
+            expected_agent_ids=EXPECTED_EXPERTS,
+        )
     )
     await asyncio.sleep(0)
 
@@ -296,13 +459,64 @@ async def test_watch_keeps_at_most_eight_accepted_findings(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_watch_verifies_same_finding_id_only_once_across_shards(tmp_path) -> None:
+    """不同分片重复发布同一 Finding 时不得重复调用模型、计数或返回裁决。"""
+
+    mailbox = Mailbox(tmp_path, "run-idempotent-finding")
+    blackboard = EvidenceBlackboard("run-idempotent-finding")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    runtime = AgentRuntime()
+    model = TestModel(
+        custom_output_args=make_verdict(
+            accepted=True,
+            verdict="confirmed",
+            confidence=0.9,
+            reason="候选可达且证据充分。",
+        )
+    )
+    expected = {"defect:ctx-a", "defect:ctx-b"}
+    watcher = asyncio.create_task(
+        VerifierAgent(model=model, runtime=runtime).watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2, max_requests=2),
+            expected_agent_ids=expected,
+        )
+    )
+    await asyncio.sleep(0)
+
+    finding = make_finding("finding-shared")
+    await publish_candidate(publisher, finding, sender="defect:ctx-a")
+    await publish_candidate(publisher, finding, sender="defect:ctx-b")
+    for agent_id in sorted(expected):
+        await publisher.publish(
+            sender=agent_id,
+            recipient="*",
+            kind="agent_completed",
+            key="completed",
+            payload={"agent_id": agent_id, "role": "defect"},
+        )
+    verdicts = await watcher
+
+    assert runtime.request_count == 1
+    assert len(verdicts) == 1
+    assert verdicts[0].finding_id == "finding-shared"
+    assert len(blackboard.by_kind("verdict")) == 1
+
+
+@pytest.mark.asyncio
 async def test_cancelled_watch_publishes_only_failed_terminal(tmp_path) -> None:
     """外部取消必须发布一次失败终态并继续传播取消。"""
 
     mailbox = Mailbox(tmp_path, "run-cancel-verifier")
     blackboard = EvidenceBlackboard("run-cancel-verifier")
     task = asyncio.create_task(
-        VerifierAgent().watch(mailbox, blackboard, Budget(seconds=2))
+        VerifierAgent().watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2),
+            expected_agent_ids=EXPECTED_EXPERTS,
+        )
     )
     await asyncio.sleep(0.02)
 
@@ -331,3 +545,137 @@ async def test_watch_timeout_returns_partial_verdicts_and_completed_terminal(tmp
     assert failed == []
     assert len(completed) == 1
     assert "时间预算" in completed[0].payload["warning"]
+
+
+@pytest.mark.asyncio
+async def test_watch_deadline_cancels_blocked_model_and_returns_partial_verdict(tmp_path) -> None:
+    """模型调用挂起时，绝对截止必须取消调用并保守返回部分结果。"""
+
+    mailbox = Mailbox(tmp_path, "run-model-timeout")
+    blackboard = EvidenceBlackboard("run-model-timeout")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    model = BlockingVerdictModel()
+    watcher = asyncio.create_task(
+        VerifierAgent(model=model).watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=1),
+            expected_agent_ids={"defect:ctx-sql"},
+        )
+    )
+    await asyncio.sleep(0)
+    await publish_candidate(publisher, make_finding("finding-blocked"))
+    await publisher.publish(
+        sender="defect:ctx-sql",
+        recipient="*",
+        kind="agent_completed",
+        key="completed",
+        payload={"agent_id": "defect:ctx-sql", "role": "defect"},
+    )
+    await asyncio.wait_for(model.started.wait(), timeout=0.5)
+
+    verdicts = await asyncio.wait_for(watcher, timeout=1.5)
+
+    assert model.cancelled.is_set()
+    assert len(verdicts) == 1
+    assert verdicts[0].accepted is False
+    assert verdicts[0].verdict == "insufficient_evidence"
+    assert blackboard.by_kind("verification_request") == []
+    completed = [item for item in blackboard.by_kind("agent_completed") if item.sender == "verifier"]
+    failed = [item for item in blackboard.by_kind("agent_failed") if item.sender == "verifier"]
+    assert len(completed) == 1
+    assert "时间预算" in completed[0].payload["warning"]
+    assert failed == []
+
+
+@pytest.mark.asyncio
+async def test_watch_stops_after_only_expected_agent_finishes(tmp_path) -> None:
+    """只启动单个专家时，其实例终态必须让 watcher 正常收敛而非等待超时。"""
+
+    mailbox = Mailbox(tmp_path, "run-single-agent")
+    blackboard = EvidenceBlackboard("run-single-agent")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    watcher = asyncio.create_task(
+        VerifierAgent().watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2),
+            expected_agent_ids={"defect:ctx-only"},
+        )
+    )
+    await asyncio.sleep(0)
+
+    await publisher.publish(
+        sender="defect:ctx-only",
+        recipient="*",
+        kind="agent_completed",
+        key="completed",
+        payload={"agent_id": "defect:ctx-only", "role": "defect"},
+    )
+    verdicts = await asyncio.wait_for(watcher, timeout=0.5)
+
+    assert verdicts == []
+    terminal = [item for item in blackboard.by_kind("agent_completed") if item.sender == "verifier"]
+    assert len(terminal) == 1
+    assert "warning" not in terminal[0].payload
+
+
+@pytest.mark.asyncio
+async def test_watch_waits_for_every_expected_shard_instance(tmp_path) -> None:
+    """同角色多分片时，任一实例未终止都不得让 watcher 提前退出。"""
+
+    mailbox = Mailbox(tmp_path, "run-shards")
+    blackboard = EvidenceBlackboard("run-shards")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=blackboard)
+    expected = {"defect:ctx-a", "defect:ctx-b", "intent:ctx-a"}
+    watcher = asyncio.create_task(
+        VerifierAgent().watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2),
+            expected_agent_ids=expected,
+        )
+    )
+    await asyncio.sleep(0)
+
+    for agent_id, role in (("defect:ctx-a", "defect"), ("intent:ctx-a", "intent")):
+        await publisher.publish(
+            sender=agent_id,
+            recipient="*",
+            kind="agent_completed",
+            key="completed",
+            payload={"agent_id": agent_id, "role": role},
+        )
+    await asyncio.sleep(0.02)
+    assert watcher.done() is False
+
+    await publisher.publish(
+        sender="defect:ctx-b",
+        recipient="*",
+        kind="agent_completed",
+        key="completed",
+        payload={"agent_id": "defect:ctx-b", "role": "defect"},
+    )
+    assert await asyncio.wait_for(watcher, timeout=0.5) == []
+
+
+@pytest.mark.asyncio
+async def test_watch_accepts_explicit_stop_event_without_expected_agents(tmp_path) -> None:
+    """调用方未提供实例集合时，可用显式停止事件安全结束 watcher。"""
+
+    mailbox = Mailbox(tmp_path, "run-explicit-stop")
+    blackboard = EvidenceBlackboard("run-explicit-stop")
+    stop_event = asyncio.Event()
+    watcher = asyncio.create_task(
+        VerifierAgent().watch(
+            mailbox,
+            blackboard,
+            Budget(seconds=2),
+            stop_event=stop_event,
+        )
+    )
+    await asyncio.sleep(0)
+
+    stop_event.set()
+
+    assert await asyncio.wait_for(watcher, timeout=0.5) == []
