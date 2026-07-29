@@ -13,6 +13,7 @@ def client(tmp_path: Path):
     from reviewcrew.config import Config
     from reviewcrew.server.app import app, init_app
 
+    Config.reset_singleton()
     config = Config.from_env()
     config.runs_dir = str(tmp_path / "runs")
     init_app(config)

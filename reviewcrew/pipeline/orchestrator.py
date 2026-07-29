@@ -53,6 +53,7 @@ class Orchestrator:
         started_at = datetime.now(timezone.utc)
         warnings: list[str] = []
         all_findings: list[Finding] = []
+        rejected = 0
 
         # 发射开始事件（如果还没发射）
         existing = self.events.read(run_id)
@@ -71,6 +72,12 @@ class Orchestrator:
 
                 # 阶段 2: 构建上下文
                 repo_path = Path(request.repo_path) if request.repo_path else Path(".")
+                if request.pr_url and not request.repo_path:
+                    warnings.append(
+                        "GitHub PR 模式下未提供本地仓库路径，将使用当前工作目录 "
+                        "构建上下文。上下文可能不包含 PR 对应文件，请将仓库克隆到本地 "
+                        "并指定 --repo 路径以获得完整上下文。"
+                    )
                 packs = await self._run_stage(
                     run_id, "building_context", "上下文构建",
                     self.config.context_timeout_seconds,
@@ -137,7 +144,7 @@ class Orchestrator:
                     base_sha=pr_data.base_sha,
                     head_sha=pr_data.head_sha,
                     findings=all_findings[:8],  # 最多 8 条
-                    rejected_count=0,
+                    rejected_count=rejected,
                     coverage=[],
                     warnings=warnings,
                     started_at=started_at,
@@ -242,7 +249,6 @@ class Orchestrator:
 
     def _save_result(self, run_id: str, result: ReviewResult) -> None:
         """保存 JSON 结果到 runs/{run_id}/result.json。"""
-        import json
         run_dir = Path(self.config.runs_dir) / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "result.json").write_text(

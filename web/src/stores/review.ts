@@ -39,16 +39,15 @@ export interface CandidateEntry {
   verifierReason?: string
 }
 
-/** 预设的 6 个阶段 */
-const STAGE_KEYS = ['init', 'analysis', 'defect', 'intent', 'verify', 'report'] as const
+/** 预设的 5 个阶段（与后端事件 stage 名称一致） */
+const STAGE_KEYS = ['loading_pr', 'building_context', 'reviewing', 'verifying', 'generating_report'] as const
 
 const STAGE_NAMES: Record<string, string> = {
-  init: '初始化',
-  analysis: '并行分析',
-  defect: '缺陷检测',
-  intent: '意图分析',
-  verify: '结果验证',
-  report: '报告生成',
+  loading_pr: '加载 PR',
+  building_context: '构建上下文',
+  reviewing: '并行审查',
+  verifying: '结果验证',
+  generating_report: '生成报告',
 }
 
 export const useReviewStore = defineStore('review', () => {
@@ -131,8 +130,8 @@ export const useReviewStore = defineStore('review', () => {
         error.value = null
         reviewTitle.value = (data.pr_title as string) || (data.repo as string) || ''
         // 初始化阶段
-        updateStage('init', 'completed', timestamp)
-        updateStage('analysis', 'running', timestamp)
+        updateStage('loading_pr', 'completed', timestamp)
+        updateStage('building_context', 'running', timestamp)
         break
       }
 
@@ -263,8 +262,9 @@ export const useReviewStore = defineStore('review', () => {
           agents.value[idx].startTime = timestamp
         }
         status.value = 'verifying'
-        updateStage('analysis', 'completed', timestamp)
-        updateStage('verify', 'running', timestamp)
+        updateStage('building_context', 'completed', timestamp)
+        updateStage('reviewing', 'completed', timestamp)
+        updateStage('verifying', 'running', timestamp)
         break
       }
 
@@ -298,14 +298,14 @@ export const useReviewStore = defineStore('review', () => {
           agents.value[idx].status = 'completed'
           agents.value[idx].endTime = timestamp
         }
-        updateStage('verify', 'completed', timestamp)
-        updateStage('report', 'running', timestamp)
+        updateStage('verifying', 'completed', timestamp)
+        updateStage('generating_report', 'running', timestamp)
         break
       }
 
       case 'report.generated': {
         reportUrl.value = (data.url as string) || ''
-        updateStage('report', 'completed', timestamp)
+        updateStage('generating_report', 'completed', timestamp)
         break
       }
     }
@@ -359,8 +359,7 @@ export const useReviewStore = defineStore('review', () => {
       (defectAgent.status === 'completed' || defectAgent.status === 'failed') &&
       (intentAgent.status === 'completed' || intentAgent.status === 'failed')
     if (bothDone) {
-      updateStage('defect', 'completed', ts)
-      updateStage('intent', 'completed', ts)
+      updateStage('reviewing', 'completed', ts)
     }
   }
 

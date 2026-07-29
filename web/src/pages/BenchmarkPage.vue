@@ -204,7 +204,38 @@ function playReplay(runId: string) {
   background: #2563eb;
 }
 
+.btn-sm:focus-visible {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
 .no-data {
   color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .stats-row {
+    grid-template-columns: 1fr;
+  }
+
+  .bench-table {
+    font-size: 12px;
+  }
+
+  .bench-table th,
+  .bench-table td {
+    padding: 8px 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .bench-table-wrap {
+    overflow-x: auto;
+  }
+
+  .bench-table th,
+  .bench-table td {
+    padding: 6px 8px;
+    font-size: 11px;
+  }
 }
 </style>

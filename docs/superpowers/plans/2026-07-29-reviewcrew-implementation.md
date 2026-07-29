@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在北京时间（Asia/Shanghai，UTC+8）2026-07-30 12:00 硬截止前实现并整理好可提交、可运行、可测试、可演示的 ReviewCrew，以 GLM 5.2 和三个 Subagent 审查 Git PR diff，并完成 Greptile Benchmark 快速评测、Vue 3 前端和中文交付文档。
+**Goal:** 在北京时间（Asia/Shanghai，UTC+8）2026-07-30 12:00 硬截止前实现并整理好可提交、可运行、可测试、可演示的 ReviewCrew，以 LLM 和三个 Subagent 审查 Git PR diff，并完成 Greptile Benchmark 快速评测（MVP 5 案例）、Vue 3 前端和中文交付文档。
 
 **Architecture:** 系统使用 FastAPI 和纯 `asyncio` Orchestrator 串联 PR 加载、Diff 解析、上下文构建、两个并行专家 Agent、确定性去重、独立 Verifier 和报告生成。前端只消费冻结的 REST/SSE `PipelineEvent`，并支持从同一事件格式回放历史运行。
 
@@ -12,7 +12,7 @@
 
 - 设计规范：`docs/superpowers/specs/2026-07-29-reviewcrew-competition-design.md`，实现前必须完整阅读。
 - 最终只有 `DefectAgent`、`IntentAgent`、`VerifierAgent` 三个 Subagent。
-- 模型能力对齐 GLM 5.2，通过 OpenAI 兼容端点接入。
+- 模型能力通过 OpenAI 兼容端点接入（默认智谱 GLM 系列），通过 `LLM_BASE_URL`、`LLM_MODEL_NAME`、`LLM_API_KEY` 配置。
 - 单 PR 全局 watchdog 固定为 600 秒。
 - 分阶段上限：PR/Diff 30 秒、Context 90 秒、专家审查 300 秒、Verifier 120 秒、报告 30 秒。
 - 只围绕 PR diff 和直接相关上下文审查，不进行无目标的全仓 LLM 扫描。
@@ -54,7 +54,7 @@
 - 每 30 至 60 分钟至少形成一个可恢复检查点；如果能力已独立可验收，立即提交。
 - 每次提交后更新本计划对应 checkbox。
 - 运行超过 60 秒的命令时，定期读取输出，不进行长时间无反馈等待。
-- 外部网络、GLM 或 GitHub 不稳定时，继续完成 Fake、fixture、Replay 和离线测试，不得原地停滞。
+- 外部网络、LLM 或 GitHub 不稳定时，继续完成 Fake、fixture、Replay 和离线测试，不得原地停滞。
 - 若实现路线失败，先保留测试和接口，回退到更小的可工作实现，并用中文日志声明降级。
 - 不以“代码已写完”作为完成依据，只以验证命令成功作为完成依据。
 
@@ -67,7 +67,7 @@
 3. `npm run build` 通过。
 4. CLI 能在 Fake 模式完成端到端审查。
 5. FastAPI 的启动、状态、SSE 和 Replay 测试通过。
-6. 至少一次 GLM 5.2 smoke 成功，或明确记录因缺少 API Key 无法执行；缺少 Key 时不得声称真实调用成功。
+6. 至少一次 LLM smoke 成功，或明确记录因缺少 API Key 无法执行；缺少 Key 时不得声称真实调用成功。
 7. 至少一个真实 PR 或本地 base/head 审查完成。
 8. Benchmark 快速模式能够运行并生成报告；实际运行案例和未准备案例区分清楚。
 9. README 包含安装、配置、CLI、服务端、前端、评测和故障排查方法。
@@ -90,7 +90,7 @@
 
 ```text
 pyproject.toml                         Python 依赖、工具和测试配置
-.env.example                           GLM、GitHub 和运行参数示例
+.env.example                           LLM、GitHub 和运行参数示例
 .gitignore                             排除密钥、运行记录、仓库缓存和构建产物
 README.md                              中文安装、使用、评测和演示说明
 reviewcrew/config.py                   环境配置和时间预算
@@ -100,7 +100,7 @@ reviewcrew/team/mailbox.py             类型化收件箱、广播和消息持�
 reviewcrew/team/blackboard.py          共享证据和 Agent 状态
 reviewcrew/hooks.py                    生命周期 Hook 和安全校验
 reviewcrew/cli.py                      CLI 入口
-reviewcrew/llm/glm.py                  GLM 5.2 模型构建和 smoke
+reviewcrew/llm/glm.py                  LLM 模型构建与 smoke
 reviewcrew/github/pr_loader.py          GitHub PR 与本地 Git 加载
 reviewcrew/diff/parser.py              Unified Diff 解析
 reviewcrew/context/builder.py          Diff 中心上下文组装与裁剪
@@ -116,7 +116,18 @@ reviewcrew/agents/intent.py            IntentAgent
 reviewcrew/agents/verifier.py          VerifierAgent
 reviewcrew/agents/prompts/*.md          中文系统提示词
 reviewcrew/skills/registry.py           Skill 加载、选择和版本哈希
-reviewcrew/skills/**/*.md               共享和角色审查 Skill
+reviewcrew/skills/shared/diff-first-review.md         [MVP]
+reviewcrew/skills/shared/evidence-standard.md         [MVP]
+reviewcrew/skills/shared/changed-line-localization.md  [MVP]
+reviewcrew/skills/shared/stop-when-insufficient.md     [MVP]
+reviewcrew/skills/defect/static-breakage.md            [MVP]
+reviewcrew/skills/defect/trace-untrusted-input.md      [MVP]
+reviewcrew/skills/intent/intent-vs-implementation.md   [MVP]
+reviewcrew/skills/intent/boundary-conditions.md        [MVP]
+reviewcrew/skills/verifier/reachability-challenge.md   [MVP]
+reviewcrew/skills/verifier/pr-attribution.md           [MVP]
+reviewcrew/skills/team-lead/risk-routing.md            [MVP]
+reviewcrew/skills/team-lead/budget-allocation.md       [MVP]
 reviewcrew/pipeline/dedupe.py          确定性去重
 reviewcrew/pipeline/orchestrator.py     阶段编排、预算和降级
 reviewcrew/pipeline/report.py           JSON 与 Markdown 报告
@@ -138,7 +149,7 @@ web/src/fixtures/demo-events.jsonl     稳定演示事件
 
 ---
 
-### Task 1: 公共协议与工程地基
+### Task 1: 公共协议、事件与通信基础 `[MVP]` ⏱️ 60 分钟
 
 **Files:**
 - Create: `pyproject.toml`
@@ -147,13 +158,22 @@ web/src/fixtures/demo-events.jsonl     稳定演示事件
 - Create: `reviewcrew/__init__.py`
 - Create: `reviewcrew/config.py`
 - Create: `reviewcrew/schemas.py`
+- Create: `reviewcrew/events.py`
+- Create: `reviewcrew/team/__init__.py`
+- Create: `reviewcrew/team/mailbox.py`
+- Create: `reviewcrew/team/blackboard.py`
 - Test: `tests/test_config.py`
 - Test: `tests/test_schemas.py`
+- Test: `tests/test_events.py`
+- Test: `tests/test_mailbox.py`
 
 **Interfaces:**
 - Produces: `Config.from_env() -> Config`
 - Produces: `ReviewRequest`, `PRData`, `ChangedFile`, `DiffHunk`, `CodeEvidence`, `TextEvidence`, `StaticSignal`, `ContextPack`, `Finding`, `Verdict`, `ReviewResult`
 - Produces: `ReviewPlan`, `TeamMessage`, `HandoffRequest`, `VerificationRequest`, `EvidenceResponse`, `AgentSnapshot`
+- Produces: `EventStore.create_run() -> str`, `EventStore.emit()`, `EventStore.subscribe()`, `EventStore.read()`
+- Produces: `Mailbox.publish()`, `Mailbox.receive()`
+- Produces: `EvidenceBlackboard.apply()`
 - Constraint: 字段必须与设计规范第 5 节一致。
 
 - [ ] **Step 1: 创建最小 Python 工程配置**
@@ -190,7 +210,7 @@ Expected: FAIL，因为模块或校验尚不存在。
 
 - [ ] **Step 5: 实现配置和完整领域模型**
 
-所有公开类和复杂校验器写中文 docstring。默认预算为 `30/90/300/120/30/600` 秒；`Config` 从环境读取 GLM base URL、模型名、API Key、GitHub Token、并发数和运行目录。
+所有公开类和复杂校验器写中文 docstring。默认预算为 `30/90/300/120/30/600` 秒；`Config` 从环境读取 LLM base URL、模型名、API Key、GitHub Token、并发数和运行目录。
 
 - [ ] **Step 6: 运行测试并确认通过**
 
@@ -205,27 +225,7 @@ git add pyproject.toml .env.example .gitignore reviewcrew tests/test_config.py t
 git commit -m "feat: 定义审查领域模型与工程配置"
 ```
 
-### Task 2: PipelineEvent、Mailbox、Blackboard 与 Replay 基础
-
-**Files:**
-- Create: `reviewcrew/events.py`
-- Create: `reviewcrew/team/__init__.py`
-- Create: `reviewcrew/team/mailbox.py`
-- Create: `reviewcrew/team/blackboard.py`
-- Test: `tests/test_events.py`
-- Test: `tests/test_mailbox.py`
-
-**Interfaces:**
-- Consumes: `Config.runs_dir`
-- Produces: `EventStore.create_run() -> str`
-- Produces: `EventStore.emit(run_id: str, event_type: EventType, data: dict[str, Any]) -> PipelineEvent`
-- Produces: `EventStore.subscribe(run_id: str) -> AsyncIterator[PipelineEvent]`
-- Produces: `EventStore.read(run_id: str) -> list[PipelineEvent]`
-- Produces: `Mailbox.publish(message: TeamMessage) -> None`
-- Produces: `Mailbox.receive(agent_id: str) -> AsyncIterator[TeamMessage]`
-- Produces: `EvidenceBlackboard.apply(message: TeamMessage) -> None`
-
-- [ ] **Step 1: 写事件顺序和持久化测试**
+- [ ] **Step 8: 写事件顺序和持久化测试**
 
 ```python
 def test_events_receive_monotonic_sequence(tmp_path):
@@ -237,13 +237,11 @@ def test_events_receive_monotonic_sequence(tmp_path):
     assert store.read(run_id) == [first, second]
 ```
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [ ] **Step 9: 运行事件测试并确认失败**
 
 Run: `pytest tests/test_events.py -v`
 
-Expected: FAIL，因为 `EventStore` 不存在。
-
-- [ ] **Step 3: 写 Mailbox 幂等、过期和路由测试**
+- [ ] **Step 10: 写 Mailbox 幂等、过期和路由测试**
 
 ```python
 @pytest.mark.asyncio
@@ -259,34 +257,43 @@ async def test_mailbox_routes_private_message_once(tmp_path):
 
 另写测试确认已过期 `verification_request` 不会送达、广播消息可以被订阅角色接收、消息追加到 `mailbox.jsonl`。
 
-- [ ] **Step 4: 实现 JSONL 事件存储、Mailbox 和 Blackboard**
+- [ ] **Step 11: 运行 Mailbox 测试并确认失败**
 
-每条事件立即刷新到 `runs/{run_id}/events.jsonl`，消息刷新到 `runs/{run_id}/mailbox.jsonl`。Mailbox 使用每 Agent `asyncio.Queue`、广播订阅、消息 ID 幂等集合和 correlation ID。Blackboard 只保存 Context、Signal、Finding、Verdict、Snapshot 和状态，不保存隐藏思维链。
+Run: `pytest tests/test_mailbox.py -v`
 
-- [ ] **Step 5: 运行测试并确认通过**
+- [ ] **Step 12: 实现 JSONL 事件存储、Mailbox 和 Blackboard**
 
-Run: `pytest tests/test_events.py tests/test_mailbox.py -v`
+每条事件立即刷新到 `runs/{run_id}/events.jsonl`，消息刷新到 `runs/{run_id}/mailbox.jsonl`。Mailbox 使用每 Agent `asyncio.Queue`、广播订阅、消息 ID 幂等集合和 correlation ID。
+
+- [ ] **Step 13: 运行全部 Task 1 测试并确认通过**
+
+Run: `pytest tests/test_config.py tests/test_schemas.py tests/test_events.py tests/test_mailbox.py -v`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 14: 提交**
 
 ```powershell
 git add reviewcrew/events.py reviewcrew/team tests/test_events.py tests/test_mailbox.py
 git commit -m "feat: 实现审查事件与 Agent Mailbox"
 ```
 
-### Task 3: Unified Diff 解析
+### Task 2: Diff 解析与 PR 加载 `[MVP]` ⏱️ 45 分钟
 
 **Files:**
 - Create: `reviewcrew/diff/__init__.py`
 - Create: `reviewcrew/diff/parser.py`
+- Create: `reviewcrew/github/__init__.py`
+- Create: `reviewcrew/github/pr_loader.py`
 - Create: `tests/fixtures/sample.diff`
 - Test: `tests/test_diff_parser.py`
+- Test: `tests/test_pr_loader.py`
 
 **Interfaces:**
 - Produces: `parse_unified_diff(raw_diff: str) -> list[ChangedFile]`
 - Produces: `changed_line_set(files: list[ChangedFile]) -> dict[str, set[int]]`
+- Consumes: `ReviewRequest`
+- Produces: `async load_pr(request: ReviewRequest, config: Config) -> PRData`
 
 - [ ] **Step 1: 创建包含新增、删除、重命名和多 hunk 的 fixture**
 
@@ -324,19 +331,7 @@ git add reviewcrew/diff tests/fixtures/sample.diff tests/test_diff_parser.py
 git commit -m "feat: 解析拉取请求差异与修改行"
 ```
 
-### Task 4: GitHub PR 和本地 Git 加载
-
-**Files:**
-- Create: `reviewcrew/github/__init__.py`
-- Create: `reviewcrew/github/pr_loader.py`
-- Test: `tests/test_pr_loader.py`
-
-**Interfaces:**
-- Consumes: `ReviewRequest`
-- Produces: `async load_pr(request: ReviewRequest, config: Config) -> PRData`
-- Uses: GitHub REST `GET /repos/{owner}/{repo}/pulls/{number}` with diff media type.
-
-- [ ] **Step 1: 写 GitHub URL 解析和 HTTP Mock 测试**
+- [ ] **Step 7: 写 GitHub URL 解析和 HTTP Mock 测试**
 
 ```python
 @pytest.mark.asyncio
@@ -348,30 +343,30 @@ async def test_load_github_pr_returns_pr_data(respx_mock):
     assert result.head_sha == "head123"
 ```
 
-- [ ] **Step 2: 写本地仓库错误测试**
+- [ ] **Step 8: 写本地仓库错误测试**
 
 验证路径不存在、ref 不存在和 diff 命令失败时返回中文可操作错误。
 
-- [ ] **Step 3: 运行测试并确认失败**
+- [ ] **Step 9: 运行测试并确认失败**
 
 Run: `pytest tests/test_pr_loader.py -v`
 
-- [ ] **Step 4: 实现 GitHub 和本地两种 Loader**
+- [ ] **Step 10: 实现 GitHub 和本地两种 Loader**
 
-GitHub Token 可选；不得记录 Token。本地模式使用参数化的 `git diff $baseRef...$headRef` 获取 diff，`$baseRef` 和 `$headRef` 必须先通过 `git rev-parse --verify` 校验，命令工作目录必须固定为指定仓库路径。
+GitHub Token 可选；本地模式使用 `git diff`。命令工作目录固定为指定仓库路径。
 
-- [ ] **Step 5: 运行测试并确认通过**
+- [ ] **Step 11: 运行测试并确认通过**
 
 Run: `pytest tests/test_pr_loader.py -v`
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 12: 提交**
 
 ```powershell
 git add reviewcrew/github tests/test_pr_loader.py
 git commit -m "feat: 加载 GitHub 与本地拉取请求"
 ```
 
-### Task 5: 只读工具箱和 Context Builder
+### Task 3: 只读工具与上下文构建 `[MVP]` ⏱️ 60 分钟
 
 **Files:**
 - Create: `reviewcrew/tools/__init__.py`
@@ -431,7 +426,7 @@ git add reviewcrew/tools reviewcrew/context tests/test_tools.py tests/test_conte
 git commit -m "feat: 构建差异中心上下文与只读工具"
 ```
 
-### Task 6: GLM 5.2 与 Agent 公共运行时
+### Task 4: Agent 运行时、Hooks 与核心 Skills `[MVP]` ⏱️ 90 分钟
 
 **Files:**
 - Create: `reviewcrew/llm/__init__.py`
@@ -446,6 +441,14 @@ git commit -m "feat: 构建差异中心上下文与只读工具"
 - Create: `reviewcrew/skills/registry.py`
 - Create: `reviewcrew/skills/shared/diff-first-review.md`
 - Create: `reviewcrew/skills/shared/evidence-standard.md`
+- Create: `reviewcrew/skills/shared/changed-line-localization.md`
+- Create: `reviewcrew/skills/shared/stop-when-insufficient.md`
+- Create: `reviewcrew/skills/defect/static-breakage.md`
+- Create: `reviewcrew/skills/defect/trace-untrusted-input.md`
+- Create: `reviewcrew/skills/intent/intent-vs-implementation.md`
+- Create: `reviewcrew/skills/intent/boundary-conditions.md`
+- Create: `reviewcrew/skills/verifier/reachability-challenge.md`
+- Create: `reviewcrew/skills/verifier/pr-attribution.md`
 - Create: `reviewcrew/skills/team-lead/risk-routing.md`
 - Create: `reviewcrew/skills/team-lead/budget-allocation.md`
 - Test: `tests/test_glm.py`
@@ -482,9 +485,9 @@ git commit -m "feat: 构建差异中心上下文与只读工具"
 
 Run: `pytest tests/test_glm.py tests/test_agent_runtime.py tests/test_hooks.py tests/test_skill_registry.py -v`
 
-- [ ] **Step 6: 实现 GLM 模型、AgentRuntime、Hooks 和 SkillRegistry**
+- [ ] **Step 6: 实现 LLM 模型、AgentRuntime、Hooks 和 SkillRegistry**
 
-通过 OpenAI 兼容 Provider 接入；temperature 使用模型支持的最低稳定值。公开日志使用中文，禁止记录完整 Prompt 和响应原文。
+通过 OpenAI 兼容 Provider 接入；默认模型为智谱 GLM 系列，可通过 `LLM_MODEL_NAME` 替换。temperature 使用模型支持的最低稳定值。公开日志使用中文，禁止记录完整 Prompt 和响应原文。
 
 Prompt 组装顺序固定为共享规则、角色 Prompt、动态 Skill、ReviewPlan/Context/Mailbox、剩余预算和输出 Schema。运行记录保存 Prompt 文件哈希、Skill 名称和版本。
 
@@ -496,7 +499,7 @@ TeamLead 只输出 ReviewPlan、分片、角色路由和预算，不直接生成
 
 Run: `python -m reviewcrew.llm.glm --smoke`
 
-无 `GLM_API_KEY` 时输出中文说明并以非零状态退出；有 Key 时要求模型返回固定 Pydantic 对象。
+无 `LLM_API_KEY` 时输出中文说明并以非零状态退出；有 Key 时要求模型返回固定 Pydantic 对象。
 
 - [ ] **Step 9: 运行离线测试并确认通过**
 
@@ -509,7 +512,7 @@ git add reviewcrew/llm reviewcrew/agents/base.py reviewcrew/agents/team_lead.py 
 git commit -m "feat: 实现主 Agent、Hooks 与 Skill 运行时"
 ```
 
-### Task 7: DefectAgent 与 IntentAgent
+### Task 5: DefectAgent 与 IntentAgent `[MVP]` ⏱️ 60 分钟
 
 **Files:**
 - Create: `reviewcrew/agents/defect.py`
@@ -518,16 +521,8 @@ git commit -m "feat: 实现主 Agent、Hooks 与 Skill 运行时"
 - Create: `reviewcrew/agents/prompts/intent.md`
 - Create: `reviewcrew/skills/defect/static-breakage.md`
 - Create: `reviewcrew/skills/defect/trace-untrusted-input.md`
-- Create: `reviewcrew/skills/defect/authorization-ownership.md`
-- Create: `reviewcrew/skills/defect/resource-lifecycle.md`
-- Create: `reviewcrew/skills/defect/async-concurrency.md`
-- Create: `reviewcrew/skills/defect/unbounded-growth.md`
 - Create: `reviewcrew/skills/intent/intent-vs-implementation.md`
 - Create: `reviewcrew/skills/intent/boundary-conditions.md`
-- Create: `reviewcrew/skills/intent/state-machine.md`
-- Create: `reviewcrew/skills/intent/api-contract.md`
-- Create: `reviewcrew/skills/intent/cross-file-consistency.md`
-- Create: `reviewcrew/skills/intent/architecture-boundary.md`
 - Test: `tests/test_expert_agents.py`
 
 **Interfaces:**
@@ -562,7 +557,7 @@ git add reviewcrew/agents/defect.py reviewcrew/agents/intent.py reviewcrew/agent
 git commit -m "feat: 实现缺陷与意图审查 Agent"
 ```
 
-### Task 8: 去重与 VerifierAgent
+### Task 6: 去重与 VerifierAgent `[MVP]` ⏱️ 45 分钟
 
 **Files:**
 - Create: `reviewcrew/pipeline/__init__.py`
@@ -570,10 +565,7 @@ git commit -m "feat: 实现缺陷与意图审查 Agent"
 - Create: `reviewcrew/agents/verifier.py`
 - Create: `reviewcrew/agents/prompts/verifier.md`
 - Create: `reviewcrew/skills/verifier/reachability-challenge.md`
-- Create: `reviewcrew/skills/verifier/upstream-protection.md`
 - Create: `reviewcrew/skills/verifier/pr-attribution.md`
-- Create: `reviewcrew/skills/verifier/severity-calibration.md`
-- Create: `reviewcrew/skills/verifier/duplicate-check.md`
 - Test: `tests/test_dedupe.py`
 - Test: `tests/test_verifier.py`
 
@@ -608,7 +600,7 @@ git add reviewcrew/pipeline/dedupe.py reviewcrew/agents/verifier.py reviewcrew/a
 git commit -m "feat: 验证并去重候选问题"
 ```
 
-### Task 9: Orchestrator、报告与 CLI
+### Task 7: Orchestrator、报告与 CLI `[MVP]` ⏱️ 60 分钟
 
 **Files:**
 - Create: `reviewcrew/pipeline/orchestrator.py`
@@ -662,7 +654,7 @@ git add reviewcrew/pipeline reviewcrew/cli.py tests/test_orchestrator.py tests/t
 git commit -m "feat: 编排审查流程并生成报告"
 ```
 
-### Task 10: FastAPI、SSE 与 Replay
+### Task 8: FastAPI、SSE 与 Replay `[MVP]` ⏱️ 45 分钟
 
 **Files:**
 - Create: `reviewcrew/server/__init__.py`
@@ -706,7 +698,7 @@ git add reviewcrew/server tests/test_server.py
 git commit -m "feat: 提供审查接口与事件回放"
 ```
 
-### Task 11: Greptile Benchmark 数据、Judge 与报告
+### Task 9: Greptile Benchmark MVP（5 案例）`[MVP]` ⏱️ 45 分钟
 
 **Files:**
 - Create: `benchmark/__init__.py`
@@ -722,11 +714,11 @@ git commit -m "feat: 提供审查接口与事件回放"
 **Interfaces:**
 - Produces: `load_dataset(path: Path, ready_only: bool = True) -> list[DatasetEntry]`
 - Produces: `judge_case(entry: DatasetEntry, result: ReviewResult) -> JudgeResult`
-- Produces: commands `--mode quick`, `--mode full`, `--case sentry-01`
+- Produces: commands `--mode quick`（每仓库 1 个 ready 案例）、`--case sentry-01`（单个调试）
 
 - [ ] **Step 1: 填入 5 个仓库的最小数据集骨架**
 
-每个仓库至少一个案例记录，未核对案例使用 `needs_review`，禁止使用伪 SHA 或伪成功链接冒充 `ready`。
+每个仓库至少一个案例记录，初始状态 `needs_review`。MVP 目标：截止前至少 5 个案例达到 `ready`。禁止使用伪 SHA 或伪成功链接冒充 `ready`。
 
 - [ ] **Step 2: 写 Dataset 校验测试**
 
@@ -746,7 +738,7 @@ Run: `pytest tests/test_benchmark_models.py tests/test_benchmark_judge.py tests/
 
 - [ ] **Step 6: 实现数据模型、Judge、Runner 和报告**
 
-主命中率只使用实际完成运行的 ready 案例。报告同时统计非目标 Finding、耗时、超时、Verifier 接受/拒绝和需要人工复核数。
+主命中率只使用实际完成运行的 ready 案例（MVP 最多 5 个）。不实现 `--mode full`。报告同时统计非目标 Finding、耗时、超时、Verifier 接受/拒绝和需要人工复核数。评测报告必须明确标注实际运行案例数，禁止虚报。
 
 - [ ] **Step 7: 运行 Fake 快速评测**
 
@@ -758,10 +750,10 @@ Expected: 生成结果目录，不访问网络。
 
 ```powershell
 git add benchmark tests/test_benchmark_models.py tests/test_benchmark_judge.py tests/test_benchmark_runner.py
-git commit -m "feat: 实现 Greptile Benchmark 评测流程"
+git commit -m "feat: 实现 Greptile Benchmark 评测流程（MVP 5 案例）"
 ```
 
-### Task 12: Vue 3 前端协议和 Replay 驱动页面
+### Task 10: Vue 前端、全栈集成与文档 `[MVP]` ⏱️ 90 分钟
 
 **Files:**
 - Create: `web/package.json`
@@ -830,97 +822,46 @@ git add web
 git commit -m "feat: 实现 Vue 审查与评测控制台"
 ```
 
-### Task 13: 全栈契约集成与真实冒烟
-
-**Files:**
-- Create: `tests/test_end_to_end.py`
-- Modify: `web/src/api/client.ts`
-- Modify: `reviewcrew/server/app.py`
-
-**Interfaces:**
-- Verifies: `ContextPack → Finding → Verdict → ReviewResult → PipelineEvent → Vue Store`
-
-- [ ] **Step 1: 写 Fake 全链路测试**
+- [ ] **Step 9: 写 Fake 全链路集成测试**
 
 使用临时 Git 仓库构造 base/head，运行 Orchestrator，断言报告、事件、结果文件和最终 Finding 都存在。
 
-- [ ] **Step 2: 运行测试并确认失败**
-
-Run: `pytest tests/test_end_to_end.py -v`
-
-- [ ] **Step 3: 修复跨模块协议差异**
-
-只能修复契约适配和真实缺陷，不在此任务中重新设计 Schema。
-
-- [ ] **Step 4: 运行全部后端和前端验证**
+- [ ] **Step 10: 运行全部后端和前端验证**
 
 Run: `pytest -q`
 
-Run: `npm test -- --run`
+Run: `npm test -- --run`（工作目录 `web`）
 
-Run: `npm run build`
+Run: `npm run build`（工作目录 `web`）
 
-Workdir for npm: `web`
-
-- [ ] **Step 5: 执行真实 GLM smoke**
+- [ ] **Step 11: 执行真实 LLM smoke**
 
 Run: `python -m reviewcrew.llm.glm --smoke`
 
 Expected: 有 Key 时成功；无 Key 时记录为待用户提供，不伪造成功。
 
-- [ ] **Step 6: 执行一个真实 PR 或本地提交审查**
+- [ ] **Step 12: 编写中文 README**
 
-先设置 `REVIEWCREW_SMOKE_REPO`、`REVIEWCREW_SMOKE_BASE`、`REVIEWCREW_SMOKE_HEAD`，然后运行：
+必须提供 PowerShell 命令：创建虚拟环境、安装依赖、配置 `.env`、运行测试、运行 CLI、启动服务、启动前端、运行 Benchmark。明确第一版使用文档和 Git 历史作为知识源，后续增量索引属于维护设计。
 
-`python -m reviewcrew.cli review --repo $env:REVIEWCREW_SMOKE_REPO --base $env:REVIEWCREW_SMOKE_BASE --head $env:REVIEWCREW_SMOKE_HEAD`
+- [ ] **Step 13: 编写评测报告模板并填入真实结果**
 
-Expected: 600 秒内生成 `result.json`、`report.md` 和 `events.jsonl`。
+每行包含仓库、语言、测试 PR、目标漏洞、是否命中、Finding 定位、耗时。标注实际运行案例数（MVP 目标 5 个），未运行和失败必须明确。
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 14: 编写三分钟演示脚本**
 
-```powershell
-git add tests/test_end_to_end.py reviewcrew web/src/api/client.ts
-git commit -m "test: 验证全栈审查工作流"
-```
+固定分镜：痛点 20s → PR 启动 20s → 并行审查 50s → Verifier 35s → Finding 35s → Benchmark 30s → 总结 20s。优先 Replay 兜底。
 
-### Task 14: 中文 README、评测报告与演示材料
-
-**Files:**
-- Create: `README.md`
-- Create: `docs/评测报告.md`
-- Create: `docs/演示脚本.md`
-
-**Interfaces:**
-- Documents: 安装、配置、CLI、服务端、前端、Benchmark、Replay、降级和故障排查。
-
-- [ ] **Step 1: 编写 README**
-
-必须提供 PowerShell 命令：创建虚拟环境、安装 Python、安装前端、配置 `.env`、运行测试、运行 CLI、启动 FastAPI、启动 Vue、运行 Benchmark。
-
-- [ ] **Step 2: 编写知识库维护方案**
-
-明确第一版使用文档、测试、配置和 Git 历史；说明合并触发的增量索引方案属于维护设计，禁止宣称未实现能力已上线。
-
-- [ ] **Step 3: 编写评测报告模板并填入真实结果**
-
-每行包含仓库、语言、测试 PR、上游修复 PR、目标漏洞、是否命中、Finding 定位、耗时和 Replay 标识。未运行和失败必须明确。
-
-- [ ] **Step 4: 编写三分钟演示脚本**
-
-固定分镜：痛点 20 秒、启动 PR 20 秒、并行审查 50 秒、Verifier 35 秒、Finding 35 秒、Benchmark 30 秒、优势总结 20 秒。
-
-- [ ] **Step 5: 验证 README 命令和链接**
-
-在干净终端至少执行安装后的测试、CLI Fake 模式和前端构建。检查所有成功 PR 链接可访问。
-
-- [ ] **Step 6: 提交**
+- [ ] **Step 15: 提交**
 
 ```powershell
-git add README.md docs/评测报告.md docs/演示脚本.md
-git commit -m "docs: 补充安装评测与演示说明"
+git add tests/test_end_to_end.py reviewcrew web/src/api/client.ts README.md docs/评测报告.md docs/演示脚本.md
+git commit -m "test: 全栈集成验证与中文交付文档"
 ```
 
-### Task 15: 次日上午三 Agent 与前端专项调优
+### Task 11: 次日上午专项调优 `[扩展]`
+
+> ⚠️ 本 Task 仅在 MVP 全部完成且时间允许时执行。上午只调 Prompt/阈值/上下文选择，不改公共协议。
 
 **Files:**
 - Modify: `reviewcrew/agents/prompts/defect.md`
@@ -930,56 +871,29 @@ git commit -m "docs: 补充安装评测与演示说明"
 - Modify: `web/src/**/*.vue`
 - Create: `benchmark/results/ITERATION_LOG.md`
 
-**Interfaces:**
-- Preserves: 所有公共 Schema、HTTP 路径和 PipelineEvent 类型。
-
 - [ ] **Step 1: 09:00 建立共同 baseline**
 
-Run: `python -m benchmark.runner --mode quick`
+Run: `python -m benchmark.runner --mode quick`。记录 Git SHA、模型、案例、命中、误报和耗时到 `ITERATION_LOG.md`。
 
-记录 Git SHA、模型、案例、命中、误报和耗时。
+- [ ] **Step 2: 创建独立迭代分支**
 
-- [ ] **Step 2: 为每名开发者创建独立迭代分支**
+从同一稳定提交创建个人分支（如 `feature-1.1.2-mw`），在 `ITERATION_LOG.md` 记录父 SHA 和 Prompt/Skill 哈希。
 
-从同一稳定提交创建个人分支，例如 `feature-1.1.2-mw`、`feature-1.1.2-sxf`、`feature-1.1.2-ly`、`feature-1.1.2-zq`。每人使用团队约定的唯一后缀；创建前确认工作区没有本任务未提交改动，并在 `ITERATION_LOG.md` 记录父 SHA。
+- [ ] **Step 3: 定向调优循环（每人对应一个 Agent + 前端）**
 
-- [ ] **Step 3: 开发者 1 调优 DefectAgent**
+每条工作线：运行目标案例 → 归因 Retrieval/Reasoning/Verification/Localization/Runtime → 只修改对应层 → 相同案例复测 → 邻近案例回归 → 保存指标和版本。有收益保留，无收益不合并。每次有效变化单独提交。
 
-只修改 Defect Prompt、Semgrep 信号使用和对应测试。优先安全、静态、内存案例。每次有效变化单独提交。
+- [ ] **Step 4: 10:30 合并最佳调优并回归**
 
-- [ ] **Step 4: 开发者 2 调优 IntentAgent**
+Run: `pytest -q && npm test -- --run && npm run build`
 
-只修改 Intent Prompt、相关上下文选择和对应测试。优先业务逻辑、逻辑和架构案例。每次有效变化单独提交。
-
-- [ ] **Step 5: 开发者 3 调优 VerifierAgent**
-
-只修改 Verifier Prompt、阈值、去重和 Judge 人工复核记录。重点检查 Verifier 误杀。每次有效变化单独提交。
-
-- [ ] **Step 6: 开发者 4 优化前端**
-
-只优化真实 SSE、Replay、信息层级、Finding 展示、Benchmark 页面和录屏稳定性，不修改公共协议。
-
-- [ ] **Step 7: 每条工作线完成评测闭环并保存版本**
-
-每条工作线必须运行目标案例和至少一个邻近案例，记录 Retrieval/Reasoning/Verification/Localization/Runtime 归因、Prompt/Skill 哈希和指标。无收益版本保留在个人分支但不合并。
-
-- [ ] **Step 8: 10:30 合并最佳调优并回归**
-
-Run: `pytest -q`
-
-Run: `npm test -- --run`
-
-Run: `npm run build`
-
-- [ ] **Step 9: 11:00 运行最终快速评测**
+- [ ] **Step 5: 11:00 运行最终快速评测**
 
 Run: `python -m benchmark.runner --mode quick`
 
-只在有时间且 quick 稳定后运行更多 ready 案例。
+- [ ] **Step 6: 11:30 冻结代码**
 
-- [ ] **Step 10: 11:30 冻结代码**
-
-更新评测报告、选择最佳 Replay、检查敏感信息并提交最终代码。北京时间 11:30 冻结，12:00 前完成全部交付检查。
+更新评测报告、选择最佳 Replay、检查敏感信息并提交最终代码。12:00 硬截止。
 
 ---
 
@@ -996,7 +910,7 @@ Run: `python -m benchmark.runner --mode quick`
 - [ ] `result.json`、`report.md`、`events.jsonl` 均生成
 - [ ] 前端能够连接真实 SSE 或播放同一运行的 Replay
 - [ ] README 命令可复制执行
-- [ ] 评测报告不虚报完整 50 案例成绩
+- [ ] 评测报告不虚报案例成绩，明确标注实际运行数（MVP 目标 5 个）
 - [ ] `git status --short` 中没有误提交的密钥、缓存、Fork 仓库或 IDE 文件
 - [ ] 所有本任务变更已按能力分批提交
 - [ ] Mailbox 消息幂等、过期、路由和持久化测试通过
@@ -1009,4 +923,4 @@ Run: `python -m benchmark.runner --mode quick`
 
 创建 Goal 时使用以下完整目标，避免只写“完成项目”导致范围漂移：
 
-> 严格执行 `docs/superpowers/plans/2026-07-29-reviewcrew-implementation.md`，在北京时间（Asia/Shanghai，UTC+8）2026-07-30 12:00 硬截止前实现并整理好 ReviewCrew 的完整可提交版本。必须先阅读对应设计规范，按 Task 顺序使用测试驱动开发，频繁提交 Git，并在每次续跑时从第一个未完成 checkbox 继续。系统必须实现流式 Agent Team：TeamLeadAgent 负责风险路由和预算，DefectAgent 与 IntentAgent 并行发现候选，VerifierAgent 通过类型化 Mailbox 在专家尚未完成时流式验证，并支持一次定向补证和结构化跨 Agent 移交。必须包含 Evidence Blackboard、Mailbox 持久化、生命周期 Hooks、Tool Registry、版本化 Skill Registry、组合式中文 Prompt、PR diff 和上下文工具、600 秒 watchdog、JSON/Markdown 报告、FastAPI REST/SSE/Replay、Vue 3 前端和 Greptile Benchmark quick/case/full 流程。所有代码注释、docstring、TSDoc、运行日志、错误提示和报告正文使用中文；不得保存密钥、完整 Prompt 或隐藏思维链。外部服务失败时先完成 Fake、fixture、Replay 和离线测试并实现明确降级。建立可运行基线不代表完成：Goal 必须至少完成一轮“基线评测、失败归因、定向修改、相同案例复测、邻近案例回归、保存新迭代分支和 ITERATION_LOG”的闭环，并在时间允许时持续迭代到连续两轮没有可验证收益或北京时间 11:30。迭代分支使用 `feature-1.1.{iteration}-{owner}` 格式，例如 `feature-1.1.2-mw`；每名开发者使用唯一后缀，不得覆盖他人分支。只有后端测试、前端测试与构建、Mailbox/Hooks/Skills 测试、Fake 端到端、Benchmark Fake quick、至少一个真实审查和至少一轮版本化迭代完成后才能标记 Goal 完成；若缺少 GLM API Key，必须明确记录真实 smoke 未执行，不得伪造成功。北京时间 11:30 必须冻结代码，12:00 是全部代码、测试、文档和材料的硬截止，12:00 后不安排开发或交付缓冲。
+> 严格执行 `docs/superpowers/plans/2026-07-29-reviewcrew-implementation.md`，在北京时间（Asia/Shanghai，UTC+8）2026-07-30 12:00 硬截止前实现并整理好 ReviewCrew 的完整可提交版本。必须先阅读对应设计规范，按 Task 顺序使用测试驱动开发，频繁提交 Git，并在每次续跑时从第一个未完成 checkbox 继续。系统必须实现流式 Agent Team：TeamLeadAgent 负责风险路由和预算，DefectAgent 与 IntentAgent 并行发现候选，VerifierAgent 通过类型化 Mailbox 在专家尚未完成时流式验证，并支持一次定向补证和结构化跨 Agent 移交。必须包含 Evidence Blackboard、Mailbox 持久化、生命周期 Hooks、Tool Registry、版本化 Skill Registry、组合式中文 Prompt、PR diff 和上下文工具、600 秒 watchdog、JSON/Markdown 报告、FastAPI REST/SSE/Replay、Vue 3 前端和 Greptile Benchmark quick/case 流程（MVP 5 案例）。所有代码注释、docstring、TSDoc、运行日志、错误提示和报告正文使用中文；不得保存密钥、完整 Prompt 或隐藏思维链。外部服务失败时先完成 Fake、fixture、Replay 和离线测试并实现明确降级。建立可运行基线不代表完成：Goal 必须至少完成一轮“基线评测、失败归因、定向修改、相同案例复测、邻近案例回归、保存新迭代分支和 ITERATION_LOG”的闭环，并在时间允许时持续迭代到连续两轮没有可验证收益或北京时间 11:30。迭代分支使用 `feature-1.1.{iteration}-{owner}` 格式，例如 `feature-1.1.2-mw`；每名开发者使用唯一后缀，不得覆盖他人分支。只有后端测试、前端测试与构建、Mailbox/Hooks/Skills 测试、Fake 端到端、Benchmark Fake quick、至少一个真实审查和至少一轮版本化迭代完成后才能标记 Goal 完成；若缺少 LLM API Key，必须明确记录真实 smoke 未执行，不得伪造成功。北京时间 11:30 必须冻结代码，12:00 是全部代码、测试、文档和材料的硬截止，12:00 后不安排开发或交付缓冲。

@@ -49,6 +49,11 @@ def main() -> None:
     review_parser.add_argument(
         "--head", type=str, help="目标引用（与 --repo 配合使用）"
     )
+    review_parser.add_argument(
+        "--fake",
+        action="store_true",
+        help="强制使用 Fake/Test 模型（离线模式，不调用 LLM）",
+    )
 
     # replay 子命令
     replay_parser = sub.add_parser("replay", help="回放历史运行")
@@ -71,19 +76,34 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    asyncio.run(_run_review(request))
+    asyncio.run(_run_review(request, fake=args.fake if hasattr(args, "fake") else False))
 
 
-async def _run_review(request: ReviewRequest) -> None:
+async def _run_review(request: ReviewRequest, fake: bool = False) -> None:
     """执行审查并输出结果。"""
     config = Config.from_env()
     store = EventStore(config.runs_dir)
 
-    # 使用 Fake Model（离线测试）
-    from .llm.glm import build_fake_model
-
     orch = Orchestrator(config, store)
-    orch.model = build_fake_model()
+
+    # 模型选择：--fake 优先，否则根据 API Key 是否存在选择
+    if fake:
+        from .llm.glm import build_fake_model
+        orch.model = build_fake_model()
+        logger.warning("使用 Fake/Test 模型（--fake 模式），不会调用真实 LLM")
+    else:
+        api_key = config.llm_api_key.get_secret_value()
+        if api_key:
+            from .llm.glm import build_model
+            orch.model = build_model(config)
+            logger.info("使用 LLM 模型: %s", config.llm_model_name)
+        else:
+            from .llm.glm import build_fake_model
+            orch.model = build_fake_model()
+            logger.warning(
+                "LLM_API_KEY 未设置，自动回退到 Fake/Test 模型。"
+                "如需使用真实 LLM，请设置 LLM_API_KEY 环境变量。"
+            )
 
     logger.info("启动审查...")
     result = await orch.review(request)

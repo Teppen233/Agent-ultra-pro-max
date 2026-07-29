@@ -21,6 +21,19 @@ from ..schemas import PRData, CodeEvidence, ContextPack, DiffHunk
 from ..tools.files import safe_read
 
 
+def _safe_resolve(repo: Path, relative: Path) -> Path | None:
+    """安全解析相对路径，确保其位于仓库范围内。
+
+    返回解析后的绝对路径，如果路径穿越到仓库外则返回 None。
+    """
+    full = (repo / relative).resolve()
+    repo_resolved = repo.resolve()
+    sep = "\\" if "\\" in str(repo_resolved) else "/"
+    if not str(full).startswith(str(repo_resolved) + sep):
+        return None
+    return full
+
+
 async def build_context(
     pr: PRData,
     repo: Path,
@@ -67,19 +80,21 @@ async def build_context(
                 except (FileNotFoundError, ValueError):
                     continue
 
-        # 尝试收集同目录相关文件（限制数量）
+        # 尝试收集同目录相关文件（限制数量，防止路径穿越）
         file_dir = Path(file_path).parent
-        try:
-            for sibling in sorted((repo / file_dir).iterdir())[:5]:
-                if sibling.is_file() and sibling.name != Path(file_path).name:
-                    try:
-                        evidence = safe_read(repo, str(sibling.relative_to(repo)), 1, 50)
-                        related.append(evidence)
-                        char_count += len(evidence.content)
-                    except (FileNotFoundError, ValueError):
-                        continue
-        except (FileNotFoundError, OSError):
-            pass
+        resolved_dir = _safe_resolve(repo, file_dir)
+        if resolved_dir is not None and resolved_dir.is_dir():
+            try:
+                for sibling in sorted(resolved_dir.iterdir())[:5]:
+                    if sibling.is_file() and sibling.name != Path(file_path).name:
+                        try:
+                            evidence = safe_read(repo, str(sibling.relative_to(repo)), 1, 50)
+                            related.append(evidence)
+                            char_count += len(evidence.content)
+                        except (FileNotFoundError, ValueError):
+                            continue
+            except (FileNotFoundError, OSError):
+                pass
 
         # 检查预算
         if char_count > budget:

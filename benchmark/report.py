@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from .models import DatasetEntry, JudgeResult
+
+logger = logging.getLogger(__name__)
 
 
 def generate_summary(
@@ -18,6 +22,21 @@ def generate_summary(
     Returns:
         包含命中率、分类统计等指标的字典
     """
+    # 验证列表长度一致
+    if len(entries) != len(results):
+        logger.warning(
+            "entries 与 results 长度不一致: %d vs %d，将按较短列表生成摘要",
+            len(entries), len(results),
+        )
+
+    # 验证每对 entry/result 的 ID 匹配
+    for i, (entry, result) in enumerate(zip(entries, results)):
+        if entry.id != result.case_id:
+            logger.warning(
+                "第 %d 对 ID 不匹配: entry.id=%s vs result.case_id=%s",
+                i + 1, entry.id, result.case_id,
+            )
+
     total = len(entries)
     completed = len(results)
     caught = sum(1 for r in results if r.caught)

@@ -9,6 +9,9 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_config_singleton: "Config | None" = None
+
+
 class Config(BaseSettings):
     """ReviewCrew 全局配置，从环境变量和 .env 文件加载。"""
 
@@ -102,7 +105,7 @@ class Config(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_timeout_order(self) -> "Config":
-        """各阶段超时之和不应超过全局超时（允许一定弹性，只做软警告）。"""
+        """验证各阶段超时之和不应超过全局超时（硬校验，超出 2 倍拒绝启动）。"""
         stage_total = (
             self.pr_load_timeout_seconds
             + self.context_timeout_seconds
@@ -127,5 +130,17 @@ class Config(BaseSettings):
 
     @classmethod
     def from_env(cls) -> "Config":
-        """从环境变量创建配置实例。"""
-        return cls()
+        """从环境变量创建配置实例（模块级单例，重复调用返回同一对象）。
+
+        测试中使用 Config.reset_singleton() 可清除缓存。
+        """
+        global _config_singleton
+        if _config_singleton is None:
+            _config_singleton = cls()
+        return _config_singleton
+
+    @classmethod
+    def reset_singleton(cls) -> None:
+        """清除缓存的单例实例（供测试使用）。"""
+        global _config_singleton
+        _config_singleton = None

@@ -28,48 +28,65 @@
       </div>
     </div>
 
-    <!-- 筛选 -->
-    <div class="filters">
-      <div class="filter-group">
-        <label>严重度</label>
-        <select v-model="filterSeverity" class="select">
-          <option value="">全部</option>
-          <option value="critical">严重</option>
-          <option value="high">高</option>
-          <option value="medium">中</option>
-          <option value="low">低</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <label>类别</label>
-        <select v-model="filterCategory" class="select">
-          <option value="">全部</option>
-          <option v-for="cat in allCategories" :key="cat" :value="cat">{{ cat }}</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <label>来源</label>
-        <select v-model="filterProducer" class="select">
-          <option value="">全部</option>
-          <option value="defect">缺陷检测</option>
-          <option value="intent">意图分析</option>
-        </select>
-      </div>
+    <!-- 加载中 -->
+    <div v-if="loading" class="loading-state">
+      <div class="skeleton skeleton-title"></div>
+      <div class="skeleton skeleton-row" v-for="i in 3" :key="i"></div>
+      <p class="loading-text">正在加载审查结果...</p>
     </div>
 
-    <!-- Finding 列表 -->
-    <div v-if="filteredFindings.length === 0" class="empty-state">
-      暂无匹配的审查发现
+    <!-- 错误状态 -->
+    <div v-else-if="error" class="status-banner error">
+      {{ error }}
+      <button class="btn btn-sm" @click="retryLoad">重试</button>
+      <router-link to="/" class="btn btn-sm btn-outline">返回首页</router-link>
     </div>
 
-    <FindingCard
-      v-for="entry in filteredFindings"
-      :key="entry.finding.id"
-      :finding="entry.finding"
-      :verifier-status="entry.verifierStatus"
-      :verifier-reason="entry.verifierReason"
-      :show-detail="true"
-    />
+    <!-- 正常内容 -->
+    <template v-else>
+      <!-- 筛选 -->
+      <div class="filters">
+        <div class="filter-group">
+          <label>严重度</label>
+          <select v-model="filterSeverity" class="select">
+            <option value="">全部</option>
+            <option value="critical">严重</option>
+            <option value="high">高</option>
+            <option value="medium">中</option>
+            <option value="low">低</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>类别</label>
+          <select v-model="filterCategory" class="select">
+            <option value="">全部</option>
+            <option v-for="cat in allCategories" :key="cat" :value="cat">{{ cat }}</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>来源</label>
+          <select v-model="filterProducer" class="select">
+            <option value="">全部</option>
+            <option value="defect">缺陷检测</option>
+            <option value="intent">意图分析</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Finding 列表 -->
+      <div v-if="filteredFindings.length === 0" class="empty-state">
+        暂无匹配的审查发现
+      </div>
+
+      <FindingCard
+        v-for="entry in filteredFindings"
+        :key="entry.finding.id"
+        :finding="entry.finding"
+        :verifier-status="entry.verifierStatus"
+        :verifier-reason="entry.verifierReason"
+        :show-detail="true"
+      />
+    </template>
   </div>
 </template>
 
@@ -87,6 +104,8 @@ const runId = route.params.runId as string
 const filterSeverity = ref('')
 const filterCategory = ref('')
 const filterProducer = ref('')
+const error = ref<string | null>(null)
+const loading = ref(true)
 
 onMounted(async () => {
   try {
@@ -94,7 +113,9 @@ onMounted(async () => {
     store.reset()
     store.applyEvents(status.events)
   } catch {
-    // 处理错误
+    error.value = '加载审查结果失败，请检查网络连接或稍后重试。'
+  } finally {
+    loading.value = false
   }
 })
 
@@ -127,7 +148,7 @@ async function downloadReport() {
     a.click()
     URL.revokeObjectURL(url)
   } catch {
-    // 处理错误
+    error.value = '下载报告失败，请稍后重试。'
   }
 }
 
@@ -135,6 +156,20 @@ function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`
   const secs = (ms / 1000).toFixed(1)
   return `${secs}s`
+}
+
+async function retryLoad() {
+  error.value = null
+  loading.value = true
+  try {
+    const status = await getStatus(runId)
+    store.reset()
+    store.applyEvents(status.events)
+  } catch {
+    error.value = '加载审查结果失败，请检查网络连接或稍后重试。'
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
@@ -244,6 +279,80 @@ function formatMs(ms: number): string {
 }
 
 .btn-outline {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.loading-state {
+  padding: 48px 0;
+  text-align: center;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--color-border) 25%, #e8ecf1 50%, var(--color-border) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+  margin: 0 auto 12px;
+}
+
+.skeleton-title {
+  height: 28px;
+  width: 300px;
+  max-width: 80%;
+}
+
+.skeleton-row {
+  height: 16px;
+  width: 500px;
+  max-width: 90%;
+}
+
+.loading-text {
+  margin-top: 16px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.status-banner {
+  margin-top: 24px;
+  padding: 16px 20px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+
+.status-banner.error {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.btn-sm {
+  padding: 6px 16px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  cursor: pointer;
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.btn-outline.btn-sm {
   background: var(--color-surface);
   color: var(--color-primary);
   border: 1px solid var(--color-primary);

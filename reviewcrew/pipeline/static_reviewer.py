@@ -61,7 +61,7 @@ _RULES: list[RuleCheck] = [
         severity="medium",
         patterns=[
             r'except\s*:',
-            r'except\s+Exception\s*:\s*\n\s*pass',
+            r'except\s+Exception\s*:',
         ],
         description_template="发现过于宽泛的异常捕获，可能隐藏关键错误",
         suggestion="只捕获已知的异常类型，并在 except 块中记录日志",
@@ -97,7 +97,7 @@ _RULES: list[RuleCheck] = [
         category="logic",
         severity="low",
         patterns=[
-            r'except\s+\w+.*:\s*\n\s*pass\s*\n',
+            r'except\s+\w+.*:',
             r'\.catch\s*\(\s*\)',
         ],
         description_template="异常被捕获后未做任何处理，问题被静默忽略",
@@ -122,7 +122,7 @@ def run_static_review(pr: PRData) -> tuple[list[Finding], int]:
         for f in pr.files:
             for hunk in f.hunks:
                 # 只检查变更行
-                added_lines = _extract_additions(hunk.content)
+                added_lines = _extract_additions(hunk)
                 for line_no, content in added_lines:
                     for pattern in rule.patterns:
                         if re.search(pattern, content, re.IGNORECASE):
@@ -160,20 +160,15 @@ def run_static_review(pr: PRData) -> tuple[list[Finding], int]:
     return findings, rule_hits
 
 
-def _extract_additions(hunk_content: str) -> list[tuple[int, str]]:
-    """从 hunk 内容中提取新增行及其在 diff 中的位置。
+def _extract_additions(hunk: DiffHunk) -> list[tuple[int, str]]:
+    """从 DiffHunk 中提取新增行及其在新文件中的行号。
 
-    返回 (行号_在hunk内, 行内容) 列表。
+    返回 (行号, 行内容) 列表。
     """
     results: list[tuple[int, str]] = []
-    new_line = 0
+    new_line = hunk.new_start
 
-    for line in hunk_content.split("\n"):
-        if line.startswith("@@"):
-            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
-            if m:
-                new_line = int(m.group(1))
-            continue
+    for line in hunk.content.split("\n"):
         if line.startswith("+") and not line.startswith("+++"):
             results.append((new_line, line[1:]))
             new_line += 1

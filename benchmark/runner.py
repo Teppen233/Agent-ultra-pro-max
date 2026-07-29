@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import sys
@@ -16,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
+from reviewcrew.schemas import ReviewResult
 
 from .models import DatasetEntry, JudgeResult
 from .judge import judge_case
@@ -82,23 +84,44 @@ def run_benchmark(
     for entry in dataset:
         logger.info("评测案例: %s (%s)", entry.id, entry.title)
 
-        # Fake 模式：生成模拟结果
-        from reviewcrew.schemas import ReviewResult, Finding, CodeEvidence
+        if runner == "live":
+            # Live 模式：实际调用 ReviewCrew Orchestrator
+            from reviewcrew.config import Config
+            from reviewcrew.events import EventStore
+            from reviewcrew.pipeline.orchestrator import Orchestrator
+            from reviewcrew.schemas import ReviewRequest
 
-        result = ReviewResult(
-            run_id=f"bench-{entry.id}",
-            status="completed",
-            repository=entry.fork_repo,
-            base_sha=entry.base_sha,
-            head_sha=entry.head_sha,
-            findings=[],
-            rejected_count=0,
-            coverage=[],
-            warnings=[],
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
-            elapsed_seconds=0,
-        )
+            config = Config.from_env()
+            store = EventStore(config.runs_dir)
+            orch = Orchestrator(config, store)
+            # 使用 Fake Model（Benchmark 离线测试场景）
+            from reviewcrew.llm.glm import build_fake_model
+            orch.model = build_fake_model()
+
+            request = ReviewRequest(
+                repo_path="",
+                base_ref=entry.base_sha,
+                head_ref=entry.head_sha,
+            )
+            logger.info("  [live] 启动 Orchestrator 审查: %s", entry.fork_repo)
+            result = asyncio.run(orch.review(request))
+        else:
+            # Fake 模式：生成模拟结果（不调用任何外部服务）
+            logger.info("  [fake] 生成模拟 ReviewResult（无实际审查）")
+            result = ReviewResult(
+                run_id=f"bench-{entry.id}",
+                status="completed",
+                repository=entry.fork_repo,
+                base_sha=entry.base_sha,
+                head_sha=entry.head_sha,
+                findings=[],
+                rejected_count=0,
+                coverage=[],
+                warnings=[],
+                started_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(timezone.utc),
+                elapsed_seconds=0,
+            )
 
         judge = judge_case(entry, result)
         cases.append({

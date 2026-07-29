@@ -19,21 +19,24 @@ class TestLoadDataset:
         assert ids == {"sentry-01", "calcom-01", "grafana-01", "keycloak-01", "discourse-01"}
 
     def test_runner_loads_dataset_ready_only(self):
-        """load_dataset(ready_only=True) 应返回 0（所有案例均为 needs_review）。"""
+        """load_dataset(ready_only=True) 应返回 2 个 ready 案例。"""
         from benchmark.runner import load_dataset
 
         entries = load_dataset(ready_only=True)
-        assert len(entries) == 0
+        assert len(entries) == 2
+        entry_ids = {e.id for e in entries}
+        assert entry_ids == {"sentry-01", "calcom-01"}
 
     def test_runner_load_dataset_entries_have_required_fields(self):
-        """加载的案例应包含所有必需字段。"""
+        """加载的案例应包含所有必需字段，状态为合法值。"""
         from benchmark.runner import load_dataset
 
         entries = load_dataset(ready_only=False)
+        valid_statuses = {"ready", "needs_review", "unavailable"}
         for entry in entries:
             assert entry.id
             assert entry.language
-            assert entry.status == "needs_review"
+            assert entry.status in valid_statuses
             assert isinstance(entry.bug_locations, list)
 
     def test_runner_load_dataset_nonexistent_path(self):
@@ -89,13 +92,11 @@ class TestRunBenchmarkFake:
         assert "by_category" in summary
 
     def test_runner_fake_quick_mode(self, tmp_path: Path):
-        """quick 模式 Fake 运行应正常跳过 needs_review 案例并生成结果。"""
-        from benchmark.runner import load_dataset, run_benchmark
+        """run_benchmark 应能处理空列表（边界情况）。"""
+        from benchmark.runner import run_benchmark
 
-        entries = load_dataset(ready_only=True)
-        # ready_only 过滤后无案例，run_benchmark 应能处理空列表
         results_dir = tmp_path / "bench_results_empty"
-        result = run_benchmark(entries, results_dir=str(results_dir), runner="fake")
+        result = run_benchmark([], results_dir=str(results_dir), runner="fake")
         assert result["summary"]["total"] == 0
         assert result["summary"]["catch_rate"] == "N/A"
 

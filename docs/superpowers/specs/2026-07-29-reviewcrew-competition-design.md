@@ -14,31 +14,33 @@
 
 截止北京时间 2026-07-30 12:00，系统必须完成代码、测试、文档和可提交材料，并具备以下能力：
 
-1. 输入 GitHub PR URL，或输入本地仓库、基准提交和目标提交。
-2. 只分析 PR diff、修改符号及相关上下文，不进行无目标的全仓 LLM 扫描。
-3. 使用 GLM 5.2 完成代码理解、缺陷发现和结果验证。
-4. 覆盖静态缺陷、业务逻辑、逻辑缺陷、内存与资源问题、安全漏洞和架构问题。
-5. 使用两个专家 Subagent 生成候选缺陷，使用一个独立 Verifier Subagent 过滤误报。
-6. 单个 PR 的全流程由 600 秒全局 watchdog 约束。
-7. 输出结构化 JSON、Markdown 报告和适合前端展示的事件流。
-8. 提供 Vue 3 前端，展示审查进度、Agent 状态、Finding、Verifier 结论和评测结果。
-9. 支持历史运行 Replay，保证演示不依赖现场模型和网络稳定性。
+ 1. 输入 GitHub PR URL，或输入本地仓库、基准提交和目标提交。
+ 2. 只分析 PR diff、修改符号及相关上下文，不进行无目标的全仓 LLM 扫描。
+ 3. 使用 OpenAI 兼容端点的 LLM（默认智谱 GLM 系列）完成代码理解、缺陷发现和结果验证。通过 `LLM_BASE_URL`、`LLM_MODEL_NAME`、`LLM_API_KEY` 环境变量配置，不硬编码特定模型版本。
+ 4. 覆盖静态缺陷、业务逻辑、逻辑缺陷、内存与资源问题、安全漏洞和架构问题。
+ 5. 使用两个专家 Subagent 生成候选缺陷，使用一个独立 Verifier Subagent 过滤误报。
+ 6. 单个 PR 的全流程由 600 秒全局 watchdog 约束。
+ 7. 输出结构化 JSON、Markdown 报告和适合前端展示的事件流。
+ 8. 提供 Vue 3 前端，展示审查进度、Agent 状态、Finding、Verifier 结论和评测结果。
+ 9. 支持历史运行 Replay，保证演示不依赖现场模型和网络稳定性。
 10. 提供可运行源码、README、评测报告、成功命中链接和不超过三分钟的演示视频。
+11. 所有开发、测试和 Replay 以 Fake Model 为基线运行，不依赖网络或真实 API Key。真实 LLM 调用仅作为最终验证层，不阻塞功能实现。
 
 本次只有一次交付，不设置“远期架构”或不落地的职责。文档中出现的组件都必须在最终代码中存在；无法在时限内可靠实现的能力，只能作为可选 Provider 或明确的降级路径，不得伪装成已经完成。
 
 ## 2. 核心设计原则
 
-1. **Diff 中心**：所有分析从修改文件、hunk 和修改行出发。
-2. **按需取上下文**：只检索修改符号、直接相关代码、测试、项目文档和 Git 历史。
-3. **高召回后验证**：专家 Agent 负责寻找候选问题，Verifier 负责寻找反证并决定是否发布。
-4. **确定性编排**：Orchestrator、Context Builder、去重和报告生成使用普通代码实现，不升格为 Agent。
-5. **最小只读权限**：Agent 工具默认只允许读取仓库、搜索代码和查询 Git 信息。
-6. **单点失败可降级**：Semgrep、Git 历史或某个专家失败时，其他阶段继续执行并记录警告。
-7. **事件驱动解耦**：前端只依赖冻结的 REST、SSE 和 PipelineEvent 协议。
-8. **证据优先**：Finding 必须包含触发条件、实际影响、修改行定位和代码证据。
-9. **真实评测**：不得虚报未运行或未命中的 Benchmark 结果。
+ 1. **Diff 中心**：所有分析从修改文件、hunk 和修改行出发。
+ 2. **按需取上下文**：只检索修改符号、直接相关代码、测试、项目文档和 Git 历史。
+ 3. **高召回后验证**：专家 Agent 负责寻找候选问题，Verifier 负责寻找反证并决定是否发布。
+ 4. **确定性编排**：Orchestrator、Context Builder、去重和报告生成使用普通代码实现，不升格为 Agent。
+ 5. **最小只读权限**：Agent 工具默认只允许读取仓库、搜索代码和查询 Git 信息。
+ 6. **单点失败可降级**：Semgrep、Git 历史或某个专家失败时，其他阶段继续执行并记录警告。
+ 7. **事件驱动解耦**：前端只依赖冻结的 REST、SSE 和 PipelineEvent 协议。
+ 8. **证据优先**：Finding 必须包含触发条件、实际影响、修改行定位和代码证据。
+ 9. **真实评测**：不得虚报未运行或未命中的 Benchmark 结果。
 10. **中文工程可读性**：代码注释、docstring、运行日志、错误说明和面向用户的报告默认使用中文。
+11. **Fake Mode First**：所有 Agent、Orchestrator 和前端必须以 Fake Model 为基线开发和测试。Fake Model 返回符合 Schema 的预定义输出，使全链路可以不依赖网络和 API Key 运行。真实 LLM 调用作为最终验证层。
 
 ## 3. 最终 Subagent 拓扑
 
@@ -103,6 +105,21 @@ TeamLeadAgent 不负责：
 
 TeamLeadAgent 的 Prompt 必须强调：并行优先、证据优先、预算优先、结构化消息优先。确定性 Orchestrator 仍负责真正的任务调度、队列、超时和持久化；主 Agent 只产生计划和路由决策，避免把系统可靠性建立在一次模型调用上。
 
+**TeamLeadAgent 与 Orchestrator 职责边界：**
+
+| 职责 | TeamLeadAgent | Orchestrator |
+| --- | --- | --- |
+| 生成 ReviewPlan | ✅ | ❌ |
+| 决定语义分片策略 | ✅ | ❌ |
+| 路由风险到对应专家角色 | ✅ | ❌ |
+| 创建 asyncio.Task 并管理生命周期 | ❌ | ✅ |
+| 执行阶段超时与全局 watchdog | ❌ | ✅ |
+| Mailbox 消息投递与路由 | ❌ | ✅ |
+| 发布 stage/agent PipelineEvent | ❌ | ✅ |
+| 预算预警转发与快照指令 | ✅（决策） | ✅（执行） |
+| 死信、取消与队列关闭 | ❌ | ✅ |
+| 降级决策（跳过失败 Agent） | ❌ | ✅ |
+
 ### 3.5 流式 Agent Team
 
 Agent Team 不采用 `Defect → Intent → Verifier` 串行链路，而采用流式并行拓扑：
@@ -128,12 +145,14 @@ Agent Team 不采用 `Defect → Intent → Verifier` 串行链路，而采用�
 
 执行要求：
 
-1. 初始 ContextPack 可用后，DefectAgent、IntentAgent、Verifier watcher 和可选静态工具同时启动。
-2. 专家每产生一个候选就立即发布，Verifier 不等待全部专家结束。
-3. Verifier 可向原专家发起一次定向补证请求。
-4. 专家可以向另一专家发起结构化跨领域移交，但每个 ContextPack 最多两次。
-5. 大 PR 可以为同一角色启动多个分片实例，角色种类不增加。
-6. 所有消息进入持久化 Mailbox，并同步转化为 PipelineEvent。
+1. 初始 ContextPack 可用后，DefectAgent、IntentAgent 和可选静态工具同时启动。
+2. Verifier watcher 不随专家同时启动，而是在第一个 `candidate_finding` 消息到达 Mailbox 时由 Orchestrator 唤醒。Verifier 的 120 秒预算从第一个候选到达时开始计时。
+3. 若专家阶段（300 秒）结束仍无候选 Finding 产出，Verifier 不启动，审查结果标记为无发现问题。
+4. 专家每产生一个候选就立即发布，Verifier 不等待全部专家结束。
+5. Verifier 可向原专家发起一次定向补证请求。
+6. 专家可以向另一专家发起结构化跨领域移交，但每个 ContextPack 最多两次。
+7. 大 PR 可以为同一角色启动多个分片实例，但每个角色最多 3 个分片，角色种类不增加。
+8. 所有消息进入持久化 Mailbox，并同步转化为 PipelineEvent。
 
 ### 3.6 Mailbox 与 Evidence Blackboard
 
@@ -323,7 +342,7 @@ class ContextPack(BaseModel):
     truncated: bool = False
 ```
 
-第一版不依赖完整 Call Graph。Context Builder 通过修改符号、import、同目录文件、测试命名、代码搜索和 Git 历史生成足够上下文。
+第一版不依赖完整 Call Graph。Context Builder 通过修改符号、import、同目录文件、测试命名、代码搜索和 Git 历史生成足够上下文。单个 ContextPack 默认字符预算为 8000 字符，可通过配置调整。tree-sitter 不可用时，回退为纯文本正则符号提取。
 
 ### 5.4 Finding
 
@@ -361,6 +380,7 @@ Finding 约束：
 - 至少一条证据来自修改文件。
 - 定位必须与新增或修改行相交。
 - `reasoning_summary` 是可公开的结论摘要，不记录或展示模型隐藏思维链。
+- 单个 PR 最终发布的 Finding 上限为 8 条，超出部分按置信度截断。
 
 ### 5.5 Verdict 与 ReviewResult
 
@@ -435,7 +455,7 @@ class PipelineEvent(BaseModel):
 ## 7. HTTP 与 SSE 接口
 
 | 方法 | 路径 | 作用 |
-|---|---|---|
+| --- | --- | --- |
 | `POST` | `/api/reviews` | 启动真实审查或 Replay |
 | `GET` | `/api/reviews/{run_id}` | 查询运行状态和结果 |
 | `GET` | `/api/reviews/{run_id}/events` | 获取实时 SSE 事件 |
@@ -445,6 +465,17 @@ class PipelineEvent(BaseModel):
 | `GET` | `/api/benchmarks/latest` | 获取最近一次评测摘要 |
 
 SSE 与 Replay 必须输出相同的 PipelineEvent，前端不得为两种模式维护两套状态逻辑。
+
+所有 API 错误使用统一结构返回：
+
+```python
+class ErrorResponse(BaseModel):
+    error_code: str       # "PR_NOT_FOUND" | "TIMEOUT" | "VALIDATION_ERROR" | "REPLAY_NOT_FOUND" | "INTERNAL_ERROR"
+    detail: str           # 中文可读描述
+    run_id: str | None    # 关联运行 ID
+```
+
+HTTP 状态码约定：`400` 校验错误、`404` 资源不存在、`408` 超时、`500` 内部错误。
 
 ## 8. 工具与知识来源
 
@@ -480,7 +511,7 @@ SSE 与 Replay 必须输出相同的 PipelineEvent，前端不得为两种模式
 所有 Agent 工具通过统一 `ToolRegistry` 注册，工具元数据至少包含名称、中文说明、允许角色、超时、单次输出上限、是否需要外部程序和失败降级方式。
 
 | 工具 | 允许角色 | 主要用途 | 默认限制 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `read_file_range` | 全部 | 读取代码证据 | 单次最多 300 行 |
 | `search_code` | 全部 | 搜索符号和文本 | 最多 20 个结果 |
 | `find_related_tests` | Defect、Intent | 查找相关测试 | 最多 10 个文件 |
@@ -529,13 +560,15 @@ max_tool_calls: 4
 
 每个 Skill 正文必须定义：适用条件、检查步骤、需要收集的证据、停止条件、常见误报和输出要求。
 
-第一版 Skill 清单：
+第一版 Skill 清单（MVP，共 12 个）：
 
-- 共享：`diff-first-review`、`evidence-standard`、`changed-line-localization`、`stop-when-insufficient`。
-- Defect：`static-breakage`、`trace-untrusted-input`、`authorization-ownership`、`resource-lifecycle`、`async-concurrency`、`unbounded-growth`。
-- Intent：`intent-vs-implementation`、`boundary-conditions`、`state-machine`、`api-contract`、`cross-file-consistency`、`architecture-boundary`。
-- Verifier：`reachability-challenge`、`upstream-protection`、`pr-attribution`、`severity-calibration`、`duplicate-check`。
-- TeamLead：`risk-routing`、`semantic-sharding`、`budget-allocation`、`coverage-summary`。
+- 共享（4）：`diff-first-review`、`evidence-standard`、`changed-line-localization`、`stop-when-insufficient`。
+- Defect（2）：`static-breakage`、`trace-untrusted-input`。
+- Intent（2）：`intent-vs-implementation`、`boundary-conditions`。
+- Verifier（2）：`reachability-challenge`、`pr-attribution`。
+- TeamLead（2）：`risk-routing`、`budget-allocation`。
+
+以下 Skill 作为可选扩展，时间允许时实现：Defect 的 `authorization-ownership`、`resource-lifecycle`、`async-concurrency`、`unbounded-growth`；Intent 的 `state-machine`、`api-contract`、`cross-file-consistency`、`architecture-boundary`；Verifier 的 `upstream-protection`、`severity-calibration`、`duplicate-check`；TeamLead 的 `semantic-sharding`、`coverage-summary`。
 
 `SkillRegistry` 根据角色、风险标签、语言、修改类型和剩余预算选择 Skill。Prompt 中必须记录启用的 Skill 名称和版本，运行结果中保存 Skill 列表，便于赛马比较。
 
@@ -565,7 +598,7 @@ Verifier Prompt 的关键指令：默认尝试推翻候选；若缺少关键证�
 ## 9. 时间预算与降级策略
 
 | 阶段 | 时间上限 |
-|---|---:|
+| --- | --- |
 | PR 加载和 Diff 解析 | 30 秒 |
 | Context 构建 | 90 秒 |
 | 两专家并行审查 | 300 秒 |
@@ -576,10 +609,11 @@ Verifier Prompt 的关键指令：默认尝试推翻候选；若缺少关键证�
 降级规则：
 
 - Semgrep 缺失、失败或超时：返回空信号并记录中文警告。
+- tree-sitter 或 Python AST 不可用：回退为基于正则的符号提取，精度下降但 Context Builder 继续工作。
 - Git 历史不可用：跳过历史上下文并记录中文警告。
 - 单个专家失败：继续另一个专家和后续验证。
 - Verifier 失败：状态标记为 `partial`，只输出高置信候选，并明确标注未经完整验证。
-- GLM 结构化输出失败：携带中文校验错误最多重试两次。
+- LLM 结构化输出失败：携带中文校验错误最多重试两次。
 - 全局超时：保存当前快照、事件和部分报告。
 - 前端断线：后台审查继续，可通过状态接口恢复。
 
@@ -618,15 +652,15 @@ Verifier Prompt 的关键指令：默认尝试推翻候选；若缺少关键证�
 
 本节为所有赛马实现的强制约束。
 
-1. Python、TypeScript 和 Vue 代码中的解释性注释使用中文。
-2. Python 模块、类、公开函数和复杂私有函数使用中文 docstring。
-3. TypeScript 的公共类型、Store、Composable 和复杂组件逻辑使用中文 TSDoc 或注释。
-4. 运行日志、警告、错误信息、CLI 提示、API 的用户可见错误和报告正文使用中文。
-5. 标识符、类名、函数名、字段名、协议枚举和 HTTP 路径继续使用英文，避免破坏生态兼容性。
-6. 日志不得输出 API Key、Authorization Header、完整 Prompt、完整模型私密推理或敏感仓库内容。
-7. 日志采用结构化字段，至少包含 `run_id`、阶段、Agent、耗时和结果状态。
-8. 注释解释设计意图、约束和非显然原因，不逐行翻译代码。
-9. 测试名称可以使用英文标识符，但测试 docstring、失败提示和 fixture 说明使用中文。
+ 1. Python、TypeScript 和 Vue 代码中的解释性注释使用中文。
+ 2. Python 模块、类、公开函数和复杂私有函数使用中文 docstring。
+ 3. TypeScript 的公共类型、Store、Composable 和复杂组件逻辑使用中文 TSDoc 或注释。
+ 4. 运行日志、警告、错误信息、CLI 提示、API 的用户可见错误和报告正文使用中文。
+ 5. 标识符、类名、函数名、字段名、协议枚举和 HTTP 路径继续使用英文，避免破坏生态兼容性。
+ 6. 日志不得输出 API Key、Authorization Header、完整 Prompt、完整模型私密推理或敏感仓库内容。
+ 7. 日志采用结构化字段，至少包含 `run_id`、阶段、Agent、耗时和结果状态。
+ 8. 注释解释设计意图、约束和非显然原因，不逐行翻译代码。
+ 9. 测试名称可以使用英文标识符，但测试 docstring、失败提示和 fixture 说明使用中文。
 10. README、架构说明、评测报告和演示脚本全部使用中文。
 
 示例：
@@ -689,15 +723,15 @@ reviewcrew/
 
 赛马评判维度：
 
-1. 能否从干净环境启动。
-2. 端到端流程是否完整。
-3. 公共接口是否符合本规范。
-4. 测试和异常降级是否可靠。
-5. 中文注释、docstring 和日志是否合规。
-6. 前端演示是否稳定。
-7. GLM 5.2 真实调用是否成功。
-8. Benchmark 实际命中效果。
-9. 单 PR 是否能在 600 秒内收敛。
+ 1. 能否从干净环境启动。
+ 2. 端到端流程是否完整。
+ 3. 公共接口是否符合本规范。
+ 4. 测试和异常降级是否可靠。
+ 5. 中文注释、docstring 和日志是否合规。
+ 6. 前端演示是否稳定。
+ 7. LLM 真实调用是否成功。
+ 8. Benchmark 实际命中效果。
+ 9. 单 PR 是否能在 600 秒内收敛。
 10. 代码结构是否便于次日上午专项调优。
 
 ### 13.1 分支与版本保存
@@ -750,7 +784,7 @@ Goal 和人工调优都必须重复以下循环，而不是实现一次就结束
 2026-07-30 09:00 至 12:00：
 
 | 人员 | 工作线 |
-|---|---|
+| --- | --- |
 | 开发者 1 | DefectAgent：静态、安全、内存、资源和 Semgrep 信号调优 |
 | 开发者 2 | IntentAgent：业务逻辑、普通逻辑、架构和上下文调优 |
 | 开发者 3 | VerifierAgent：反证、误报、严重度、去重和评测归因调优 |
@@ -789,7 +823,7 @@ Goal 和人工调优都必须重复以下循环，而不是实现一次就结束
 
 ### 15.2 真实冒烟
 
-- GLM 5.2 完成一次结构化输出。
+- LLM 完成一次结构化输出。
 - GitHub PR 或本地 base/head 完成一次真实审查。
 - 生成 JSON 和 Markdown 报告。
 - 前端播放一次真实运行或对应 Replay。
@@ -804,7 +838,7 @@ Goal 和人工调优都必须重复以下循环，而不是实现一次就结束
 基准仓库为：
 
 | 语言 | 仓库 | 上游地址 |
-|---|---|---|
+| --- | --- | --- |
 | Python | Sentry | `https://github.com/getsentry/sentry` |
 | TypeScript | Cal.com | `https://github.com/calcom/cal.com` |
 | Go | Grafana | `https://github.com/grafana/grafana` |
@@ -813,7 +847,7 @@ Goal 和人工调优都必须重复以下循环，而不是实现一次就结束
 
 Greptile 的原始方法具有以下约束：
 
-1. 从每个仓库选择 10 个真实漏洞修复 PR，并追溯找到引入漏洞的提交。
+1. 从每个仓库选择 1 个真实漏洞修复 PR（MVP 共 5 个案例），并追溯找到引入漏洞的提交。时间允许时补充更多案例。
 2. 排除规模极大的修改和单文件修改，使案例更接近真实团队审查。
 3. 为每个案例构造干净的测试 PR，使 PR 重新引入原始缺陷。
 4. 被测工具可以访问完整仓库、PR diff 和基准分支。
@@ -833,11 +867,11 @@ Greptile 的原始方法具有以下约束：
 6. 核对测试 PR diff 确实重新引入目标漏洞，且不存在修复后的代码。
 7. 保存测试 PR URL，作为系统输入和最终交付链接。
 
-如果时间不足以在截止前重建全部 50 个 PR，必须优先保证：
+如果时间不足以在截止前重建全部 5 个 PR，必须优先保证：
 
 - 5 个仓库均已 Fork。
 - 每个仓库至少有一个经过核对、能够稳定运行的测试 PR。
-- 所有声称“成功扫描”的链接都指向真实运行过的测试 PR。
+- 所有声称”成功扫描”的链接都指向真实运行过的测试 PR。
 - 未运行、重建失败或结果不确定的案例明确标记，不计入分母或命中数。
 
 #### 15.3.2 数据集文件
@@ -885,9 +919,6 @@ python -m benchmark.runner --mode quick
 # 指定单个案例，用于 Subagent 调优
 python -m benchmark.runner --case sentry-01
 
-# 运行全部已准备好的案例
-python -m benchmark.runner --mode full
-
 # 从已有运行记录重新生成报告，不重复调用模型
 python -m benchmark.report --latest
 ```
@@ -912,7 +943,7 @@ benchmark/results/<timestamp>/
 2. **位置匹配**：Finding 行区间必须与目标区间重叠；为兼容重建 PR 的轻微行号变化，可配置最多正负 10 行容差，但报告必须标出是否使用容差。
 3. **语义匹配**：Finding 必须明确描述同一个错误机制和实际影响。仅文件、行号相同但描述的是另一个问题，不算命中。
 
-语义判定优先采用人工核对。批量自动化时可以使用独立 GLM Judge，但 Judge 只能读取目标漏洞描述和最终 Finding，不得读取被测 Agent 的隐藏推理。自动 Judge 输出：
+语义判定优先采用人工核对。批量自动化时可以使用独立 LLM Judge，但 Judge 只能读取目标漏洞描述和最终 Finding，不得读取被测 Agent 的隐藏推理。自动 Judge 输出：
 
 ```python
 class JudgeResult(BaseModel):
@@ -962,7 +993,7 @@ class JudgeResult(BaseModel):
 最终 `docs/评测报告.md` 至少包含：
 
 | 字段 | 说明 |
-|---|---|
+| --- | --- |
 | 仓库与语言 | 例如 Sentry / Python |
 | 测试 PR | 团队 Fork 中重新构造的 PR 链接 |
 | 上游修复 PR | 用于核对真实漏洞来源 |
@@ -980,7 +1011,7 @@ class JudgeResult(BaseModel):
 3. ReviewCrew 解释了该错误造成的实际影响。
 4. 结果未被 Verifier 拒绝。
 
-评测报告必须区分：完整 50 案例结果、截止前已准备案例结果和快速演示子集，禁止将小样本命中率表述成完整 Benchmark 成绩。
+评测报告必须明确标注实际运行案例数（MVP 目标为 5 个），禁止将小样本命中率表述成完整 Benchmark 成绩。时间允许时补充的案例单独列出并标注"扩展"。
 
 ### 15.4 11:30 冻结与 12:00 截止标准
 
@@ -1004,7 +1035,7 @@ feat: 定义审查领域模型与事件协议
 chore: 初始化后端与前端工程
 feat: 获取并解析拉取请求差异
 feat: 构建以差异为中心的审查上下文
-feat: 接入 GLM 5.2 与 Agent 运行时
+feat: 接入 LLM 与 Agent 运行时
 feat: 实现缺陷与意图审查 Agent
 feat: 实现候选问题验证与去重
 feat: 实现审查编排和报告生成
@@ -1028,4 +1059,4 @@ docs: 补充安装、评测与演示说明
 6. 展示 Benchmark 成功命中链接、耗时和覆盖类型。
 7. 总结 Diff 中心、上下文增强、传统工具信号和独立验证四项优势。
 
-现场优先使用保存好的最佳真实运行 Replay，同时保留真实审查入口作为功能证明。
+现场优先使用保存好的最佳真实运行 Replay，同时保留真实审查入口作为功能证明。若直播演示中模型调用失败或网络不稳定，立即切换为 Replay 模式，不中断演示流程。

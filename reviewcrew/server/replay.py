@@ -5,17 +5,17 @@ SSE 和 Replay 输出相同的事件格式，前端不需要维护两套逻辑�
 
 from __future__ import annotations
 
-import time
-from typing import Iterator
+import asyncio
+from typing import AsyncIterator
 
 from ..schemas import PipelineEvent
 
 
-def replay_events(
+async def replay_events(
     events: list[PipelineEvent],
     speed: float = 1.0,
-) -> Iterator[PipelineEvent]:
-    """按原始时间间隔回放事件。
+) -> AsyncIterator[PipelineEvent]:
+    """按原始时间间隔回放事件（异步，不阻塞事件循环）。
 
     Args:
         events: 按时间排序的事件列表
@@ -32,6 +32,6 @@ def replay_events(
         # 计算与上一事件的真实间隔
         delta = (event.timestamp - prev_time).total_seconds()
         if delta > 0 and speed > 0:
-            time.sleep(delta / speed)
+            await asyncio.sleep(delta / speed)
         prev_time = event.timestamp
         yield event

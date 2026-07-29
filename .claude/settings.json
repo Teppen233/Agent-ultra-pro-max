@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh pr *)",
+      "Bash(git push *)",
+      "Bash(pip install *)",
+      "Bash(pytest tests/test_config.py tests/test_schemas.py -v)",
+      "Bash(pytest tests/test_config.py tests/test_schemas.py tests/test_events.py tests/test_mailbox.py -v)",
+      "Bash(pytest tests/test_diff_parser.py tests/test_pr_loader.py -v)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(pytest tests/test_tools.py tests/test_context_builder.py -v)"
+    ]
+  }
+}

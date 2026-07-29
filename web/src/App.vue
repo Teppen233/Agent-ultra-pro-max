@@ -1,14 +1,25 @@
 <template>
   <div class="app-container">
     <header class="app-header">
-      <h1 class="app-logo" @click="$router.push('/')">ReviewCrew</h1>
+      <h1
+        class="app-logo"
+        role="button"
+        tabindex="0"
+        @click="$router.push('/')"
+        @keydown.enter="$router.push('/')"
+        @keydown.space.prevent="$router.push('/')"
+      >ReviewCrew</h1>
       <nav class="app-nav">
         <router-link to="/" class="nav-link">启动审查</router-link>
         <router-link to="/benchmark" class="nav-link">评测</router-link>
       </nav>
     </header>
     <main class="app-main">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </router-view>
     </main>
   </div>
 </template>
@@ -76,6 +87,14 @@ body {
   color: var(--color-primary);
   cursor: pointer;
   user-select: none;
+  outline: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+}
+
+.app-logo:focus-visible {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4);
 }
 
 .app-nav {
@@ -91,11 +110,16 @@ body {
   padding: 4px 8px;
   border-radius: 4px;
   transition: color 0.15s, background 0.15s;
+  outline: none;
 }
 
 .nav-link:hover {
   color: var(--color-primary);
   background: rgba(59, 130, 246, 0.06);
+}
+
+.nav-link:focus-visible {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
 }
 
 .nav-link.router-link-exact-active {
@@ -108,5 +132,56 @@ body {
   max-width: 1200px;
   width: 100%;
   margin: 0 auto;
+}
+
+/* 页面过渡动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* 全局焦点可见样式 */
+:focus-visible {
+  outline: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
+/* 响应式 */
+@media (max-width: 640px) {
+  .app-header {
+    padding: 0 12px;
+    height: 48px;
+    gap: 16px;
+  }
+
+  .app-logo {
+    font-size: 16px;
+  }
+
+  .nav-link {
+    font-size: 12px;
+    padding: 2px 6px;
+  }
+
+  .app-main {
+    padding: 12px;
+  }
 }
 </style>

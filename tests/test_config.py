@@ -4,6 +4,13 @@ import pytest
 from pydantic import ValidationError
 
 
+@pytest.fixture(autouse=True)
+def _reset_config_singleton():
+    """每个测试前重置 Config 单例，确保测试隔离。"""
+    from reviewcrew.config import Config
+    Config.reset_singleton()
+
+
 def test_config_rejects_invalid_global_timeout(monkeypatch):
     """全局超时为零或负数时应拒绝。"""
     monkeypatch.setenv("REVIEWCREW_GLOBAL_TIMEOUT_SECONDS", "0")

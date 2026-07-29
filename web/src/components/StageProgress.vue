@@ -110,16 +110,19 @@ defineProps<{
 .stage-dot-wrap.done .stage-dot {
   background: var(--color-success);
   color: #fff;
+  transition: background 0.3s ease;
 }
 
 .stage-dot-wrap.active .stage-dot {
   background: var(--color-primary);
   box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .stage-dot-wrap.failed .stage-dot {
   background: var(--color-danger);
   color: #fff;
+  transition: background 0.3s ease;
 }
 
 .dot-inner {
@@ -150,6 +153,7 @@ defineProps<{
   color: var(--color-text-muted);
   white-space: nowrap;
   text-align: center;
+  transition: color 0.3s ease, font-weight 0.3s ease;
 }
 
 .stage-dot-wrap.active .stage-label {

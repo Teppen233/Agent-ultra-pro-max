@@ -3,13 +3,48 @@
 判定规则（与 Greptile Benchmark 对齐）：
 1. 文件匹配：Finding.file 与目标文件一致
 2. 位置匹配：Finding 行区间与目标区间重叠（可配置 ±10 行容差）
-3. 语义匹配：Finding 必须描述同一个错误机制和实际影响
+3. 语义匹配：Finding 描述关键词与 bug_description 交叉比对，无交叠则需人工复核
 """
 
 from __future__ import annotations
 
+import re
+
 from reviewcrew.schemas import Finding, ReviewResult
 from .models import DatasetEntry, JudgeResult
+
+
+def _extract_keywords(text: str) -> set[str]:
+    """从描述文本中提取关键词（去重小写中文/英文词）。
+
+    简单分词策略：
+    - 中文：按非中文字符分割后保留长度 >= 2 的词
+    - 英文：按非字母数字分割后保留长度 >= 3 的词
+    """
+    keywords: set[str] = set()
+    # 中文词（长度 >= 2）
+    for match in re.findall(r'[一-鿿]{2,}', text):
+        keywords.add(match)
+    # 英文词（长度 >= 3）
+    for match in re.findall(r'[a-zA-Z0-9]{4,}', text):
+        keywords.add(match.lower())
+    return keywords
+
+
+def _is_placeholder_description(description: str) -> bool:
+    """检查描述是否为占位文本（尚未填写真实内容）。"""
+    stripped = description.strip()
+    if not stripped:
+        return True
+    placeholders = [
+        "待从", "TBD", "TODO", "placeholder",
+        "暂未", "待补充", "待确认", "需填写",
+        "待录入", "N/A",
+    ]
+    for ph in placeholders:
+        if ph in stripped:
+            return True
+    return False
 
 
 def judge_case(entry: DatasetEntry, result: ReviewResult) -> JudgeResult:
@@ -55,17 +90,27 @@ def judge_case(entry: DatasetEntry, result: ReviewResult) -> JudgeResult:
             )
 
             if location_hit:
-                # 第三层：语义匹配（默认需人工复核）
+                # 第三层：语义匹配（关键词交叉比对）
+                if entry.bug_description:
+                    entry_keywords = _extract_keywords(entry.bug_description)
+                    finding_keywords = _extract_keywords(finding.description)
+                    overlap = entry_keywords & finding_keywords
+                    semantic_hit = len(overlap) > 0
+                    has_placeholder = _is_placeholder_description(entry.bug_description)
+                else:
+                    semantic_hit = False
+                    has_placeholder = True
+
                 return JudgeResult(
                     case_id=entry.id,
                     caught=True,
                     matched_finding_id=finding.id,
                     location_match=True,
-                    semantic_match=True,  # 假设通过（需人工复核）
+                    semantic_match=semantic_hit,
                     used_line_tolerance=not exact_hit,
                     reason=f"文件: {finding.file}, 行: {finding.line_start}-{finding.line_end}, "
                     f"目标: {loc.line_start}-{loc.line_end}",
-                    needs_human_review=True,
+                    needs_human_review=has_placeholder or not semantic_hit,
                 )
 
     return JudgeResult(

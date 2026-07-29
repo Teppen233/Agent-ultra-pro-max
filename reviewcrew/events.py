@@ -7,12 +7,17 @@ SSE 和 Replay 读取相同格式的事件流。
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .schemas import EventType, PipelineEvent
+
+logger = logging.getLogger(__name__)
 
 
 class EventStore:
@@ -80,10 +85,14 @@ class EventStore:
 
         # 追加写入 JSONL
         events_file = self._base_dir / run_id / "events.jsonl"
-        with open(events_file, "a", encoding="utf-8") as f:
-            f.write(event.model_dump_json() + "\n")
-            f.flush()
-            os.fsync(f.fileno())  # 确保写入磁盘
+        try:
+            with open(events_file, "a", encoding="utf-8") as f:
+                f.write(event.model_dump_json() + "\n")
+                f.flush()
+                os.fsync(f.fileno())  # 确保写入磁盘
+        except OSError as e:
+            logger.error("无法写入事件文件 %s: %s", events_file, e)
+            raise RuntimeError(f"无法写入事件文件 {events_file}: {e}") from e
 
         return event
 
@@ -107,11 +116,39 @@ class EventStore:
             for line in f:
                 line = line.strip()
                 if line:
-                    events.append(PipelineEvent.model_validate_json(line))
+                    try:
+                        events.append(PipelineEvent.model_validate_json(line))
+                    except ValidationError:
+                        logger.warning("跳过损坏的事件行，文件=%s", events_file)
+                        continue
         return events
 
     # ---- 运行查询 ----
 
     def list_runs(self) -> list[str]:
-        """返回所有已创建的运行 ID 列表。"""
+        """返回所有运行 ID 列表，包括磁盘上持久化的历史运行。"""
+        # 扫描磁盘上已持久化的运行目录
+        if self._base_dir.exists():
+            for entry in self._base_dir.iterdir():
+                if entry.is_dir() and (entry / "events.jsonl").exists():
+                    run_id = entry.name
+                    if run_id not in self._runs:
+                        self._runs.add(run_id)
+                        # 同步序列号：从事件文件中读取最大序列号
+                        try:
+                            max_seq = 0
+                            with open(entry / "events.jsonl", encoding="utf-8") as f:
+                                for line in f:
+                                    line = line.strip()
+                                    if line:
+                                        try:
+                                            data = json.loads(line)
+                                            seq = data.get("sequence", 0)
+                                            if seq > max_seq:
+                                                max_seq = seq
+                                        except json.JSONDecodeError:
+                                            continue
+                            self._sequences[run_id] = max_seq
+                        except OSError:
+                            logger.warning("无法读取运行 %s 的事件文件", run_id)
         return sorted(self._runs)

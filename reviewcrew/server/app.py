@@ -104,8 +104,11 @@ async def start_review(request: ReviewRequest):
                 "run_id": run_id,
                 "reason": f"审查异常: {e}",
             })
+        finally:
+            _tasks.pop(run_id, None)
 
-    asyncio.create_task(_run_and_emit())
+    task = asyncio.create_task(_run_and_emit())
+    _tasks[run_id] = task
 
     return {"run_id": run_id, "mode": "live"}
 
@@ -216,7 +219,7 @@ async def replay_run_events(run_id: str, speed: float = 1.0):
         )
 
     async def replay_generator() -> AsyncIterator[dict]:
-        for event in replay_events(events, speed):
+        async for event in replay_events(events, speed):
             yield {
                 "event": event.type,
                 "data": event.model_dump_json(),

@@ -17,6 +17,18 @@
     <!-- 阶段进度条 -->
     <StageProgress :stages="store.stages" :progress="store.stageProgress" />
 
+    <!-- SSE / Replay 连接错误 -->
+    <div v-if="sseError" class="status-banner error">
+      <div>
+        <p><strong>{{ sseError }}</strong></p>
+        <p class="error-hint">请确认后端服务已启动：<code>uvicorn reviewcrew.server.app:app --reload</code></p>
+      </div>
+      <div class="error-actions">
+        <button class="btn btn-sm" @click="retryConnection">重试连接</button>
+        <router-link to="/" class="btn btn-sm btn-secondary">返回首页</router-link>
+      </div>
+    </div>
+
     <!-- Agent 状态卡片 -->
     <div class="agent-grid">
       <AgentCard v-for="agent in store.agents" :key="agent.key" :agent="agent" />
@@ -68,7 +80,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useReviewStore } from '../stores/review'
-import { connectSSE } from '../api/client'
+import { connectSSE, replayEvents } from '../api/client'
 import StageProgress from '../components/StageProgress.vue'
 import AgentCard from '../components/AgentCard.vue'
 import FindingCard from '../components/FindingCard.vue'
@@ -76,34 +88,89 @@ import FindingCard from '../components/FindingCard.vue'
 const route = useRoute()
 const store = useReviewStore()
 
-const runId = route.params.runId as string
+const runId = route.params.runId as string | undefined
+const sseError = ref<string | null>(null)
 
 // 响应式当前时间，用于驱动倒计时每秒更新
 const now = ref(Date.now())
 let timerHandle: ReturnType<typeof setInterval> | null = null
+let currentEventSource: EventSource | null = null
+
+function setupConnection(): void {
+  if (!runId) {
+    sseError.value = '缺少审查 Run ID，请返回首页重新发起审查。'
+    return
+  }
+
+  // 关闭已有连接
+  if (currentEventSource) {
+    currentEventSource.close()
+    currentEventSource = null
+  }
+
+  sseError.value = null
+  store.reset()
+
+  const isReplay = route.query.replay === '1'
+  const replaySpeed = Number(route.query.speed) || 1
+
+  currentEventSource = isReplay
+    ? replayEvents(
+        runId,
+        replaySpeed,
+        (event) => {
+          store.applyEvent(event)
+        },
+        (err) => {
+          sseError.value = 'Replay 连接失败，请检查网络或稍后重试。'
+          console.error('Replay SSE error:', err)
+        },
+        () => {
+          // SSE 正常完成
+        }
+      )
+    : connectSSE(
+        runId,
+        (event) => {
+          store.applyEvent(event)
+        },
+        (err) => {
+          sseError.value = 'SSE 连接失败，请检查网络或稍后重试。'
+          console.error('SSE error:', err)
+        },
+        () => {
+          // SSE 正常完成
+        }
+      )
+}
+
+function retryConnection(): void {
+  setupConnection()
+}
 
 onMounted(() => {
+  // 路由参数空值检查
+  if (!runId) {
+    sseError.value = '缺少审查 Run ID，请返回首页重新发起审查。'
+    return
+  }
+
   store.reset()
+
   timerHandle = setInterval(() => {
     now.value = Date.now()
   }, 1000)
 
-  const es = connectSSE(
-    runId,
-    (event) => {
-      store.applyEvent(event)
-    },
-    undefined,
-    () => {
-      // SSE 完成
-    }
-  )
-  onUnmountedCleanup = () => es.close()
+  setupConnection()
 })
 
 let onUnmountedCleanup: () => void = () => {}
 onUnmounted(() => {
   onUnmountedCleanup()
+  if (currentEventSource) {
+    currentEventSource.close()
+    currentEventSource = null
+  }
   if (timerHandle) {
     clearInterval(timerHandle)
     timerHandle = null
@@ -279,6 +346,25 @@ function getAgentName(key: string): string {
   border: 1px solid #fecaca;
 }
 
+.error-hint {
+  font-size: 12px;
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
+.error-hint code {
+  background: rgba(153, 27, 27, 0.08);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.error-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .btn-sm {
   padding: 6px 16px;
   background: var(--color-primary);
@@ -288,5 +374,35 @@ function getAgentName(key: string): string {
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-sm:focus-visible {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+}
+
+.btn-secondary {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.btn-secondary:hover {
+  background: #d1d5db;
+}
+
+@media (max-width: 640px) {
+  .review-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .countdown {
+    font-size: 16px;
+  }
+
+  .tool-item {
+    flex-wrap: wrap;
+  }
 }
 </style>

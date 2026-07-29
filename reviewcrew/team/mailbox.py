@@ -140,10 +140,10 @@ class Mailbox:
             if message.expires_at and message.expires_at < datetime.now(timezone.utc):
                 continue
 
-            if message.id in self._delivered_ids:
+            if message.id in self._delivered_ids[role]:
                 continue
 
-            self._delivered_ids.add(message.id)
+            self._delivered_ids[role].add(message.id)
 
             if message.correlation_id:
                 self._correlations[message.id] = message.correlation_id

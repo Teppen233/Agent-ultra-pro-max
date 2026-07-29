@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -82,6 +83,19 @@ class ToolRegistry:
         if handler is None:
             raise ValueError(f"工具 {name} 未绑定实现")
 
-        # 调用并裁剪输出
-        result = await handler(**arguments) if hasattr(handler, "__call__") else handler(**arguments)
+        # 在超时内调用，区分异步/同步处理器
+        async with asyncio.timeout(definition.timeout):
+            if asyncio.iscoroutinefunction(handler):
+                result = await handler(**arguments)
+            else:
+                result = handler(**arguments)
+
+        # 裁剪输出到最大字符数
+        result_str = str(result)
+        if len(result_str) > definition.max_output_chars:
+            result_str = result_str[:definition.max_output_chars] + (
+                f"\n\n[输出已截断，原始 {len(result_str)} 字符，"
+                f"最多显示 {definition.max_output_chars} 字符]"
+            )
+            return result_str
         return result
