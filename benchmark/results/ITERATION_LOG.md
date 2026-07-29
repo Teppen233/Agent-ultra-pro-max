@@ -135,3 +135,29 @@
 ### 结论
 
 1.1.5 同时补齐了跨文件 Localization 证据和团队终态竞态，全部硬门禁通过，晋升为 `stable` 与当前 Champion 候选。
+
+## Presentation-01：真实 Benchmark 执行闭环
+
+- 时间：2026-07-30 04:48（北京时间）
+- 父版本：`feature-1.1.5-mw@2c98b57`
+- 当前版本：`feature-1.1.6-mw@59b1cb6`
+- 归因层：Presentation / Runtime
+- Prompt 聚合 SHA-256：`fa36d2597f3bca9fb8665d01f1d3a84a98df61a889a01b104d119de20b79685a`
+- Skill 聚合 SHA-256：`2c173d3c2078cab2282213338f61fa9338e6396adda3b4c15348fb6ccbca9c63`
+
+### 根因与修改
+
+原 `--runner real` 在 CLI 层硬编码退出，数据集即使补成 ready 也不能进入 ReviewCrew。现在 Real Runner 默认把每个 `test_pr` 交给 Orchestrator，保留 executor 注入用于测试；没有 ready 案例时仍退出 2，拒绝把空运行伪装为成绩。README 与评测报告同步说明真实状态。
+
+### 验证
+
+- Benchmark 模型/Judge/Runner：42 项通过。
+- 后端全量：197 项通过。
+- 前端：25 项通过；生产构建 60 modules 通过。
+- Fake quick：5/5 完成，口径不变。
+- 当前生产数据集无 ready 案例：`--runner real` 退出 2，并提示先完成人工核验。
+- 直接使用数据集中公开测试 PR 验证真实适配器链路：`run-20260729-204215-9ed6a5a4`，状态 completed，0 Finding，约 285 秒；该运行只证明 GitHub PR → Orchestrator → ReviewResult 可用，不计入正式命中率。
+
+### 结论
+
+1.1.6 补齐交付要求中的真实评测执行入口，全部硬门禁通过，晋升为 `stable` 与当前 Champion 候选。正式 Greptile 命中率仍必须在人工补齐 source fix、40 位 SHA、目标行和语义关键词后计算。
