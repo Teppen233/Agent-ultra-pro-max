@@ -15,7 +15,7 @@
 | 审查范围 | 聚焦 Git PR diff，按需扩展上下文，不做全量扫描 |
 | 缺陷覆盖 | 静态缺陷 / 业务逻辑 / 逻辑缺陷 / 内存问题 / 安全漏洞 / 架构问题 |
 | 模型 | GLM 系列 API（子 Agent 独立上下文） |
-| 时效 | 单 PR 分析 ≤ 10 分钟 |
+| 时效 | 单 PR 分析 ≤ 10 分钟，总开发时限 12 小时 |
 | 评测 | Greptile Benchmark（5 仓库 × 10 个真实漏洞 PR） |
 
 ### 1.2 核心设计哲学
@@ -275,15 +275,26 @@ reviewcrew/
 
 ---
 
-## 10. 里程碑
+## 10. 里程碑（12 小时压缩版）
 
-| 阶段 | 内容 | 产出 |
-|---|---|---|
-| M1（第 1-2 天） | Fork 5 仓库、整理 50 PR 数据集、评测 harness | `dataset.yaml` + `run_eval.py` |
-| M2（第 3-4 天） | 最小管道：diff → 单 Agent → 报告 | baseline 分数 |
-| M3（第 5-7 天） | 离线 Profile + 上下文组装 + 4 专家 Agent | 分数提升曲线 |
-| M4（第 8-9 天） | Verifier + 输出控制 + 时限调优 | 误报数下降 |
-| M5（第 10-12 天） | Web UI + README + 评测报告 + 演示视频 | 交付物三件套 |
+| 阶段 | 时间 | 内容 | 产出 |
+|---|---|---|---|
+| M1 | 0-2h | 项目骨架 + GLM client + 简易评测 harness（1-2 仓库 × 3-5 PR） | `cli.py` + `llm/glm.py` + 跑通 baseline |
+| M2 | 2-5h | 核心管道：diff 解析 → 上下文组装 → 2 专家 Agent（Security + Logic）并行 → 报告 | 端到端可跑，第一批分数 |
+| M3 | 5-8h | Verifier 对抗验证 + 输出控制 + 时限调优 + Memory/Arch Agent（如有余力） | 误报数下降，分数提升 |
+| M4 | 8-11h | Web UI（Vue3 最小可用版：提交 PR URL → 看审查结果 + Agent 思考流） | 可演示的 UI |
+| M5 | 11-12h | README + 评测报告 + 录屏 + 最终提交 | 交付物 |
+
+### 10.1 12h 范围裁切
+
+| 原计划 | 12h 策略 |
+|---|---|
+| 5 仓库 × 50 PR benchmark | 1-2 仓库 × 3-5 PR 快速验证，保证评测流程跑通 |
+| 离线 Profile（tree-sitter + 架构摘要 + bug 挖掘） | **砍掉**：上下文组装阶段直接读文件 + git blame，不做预索引 |
+| 4 专家 Agent | 优先 Security + Logic；Memory + Arch 作为 stretch goal |
+| 完整 Web UI（实时 SSE + 回放） | 最小可用版：输入 PR URL → 轮询/SSE 展示结果 |
+| Semgrep/linter 信号层 | **砍掉**：纯 Agent 推理，12h 内集成外部工具风险太高 |
+| 历史 bug 模式挖掘 | **砍掉**：无离线阶段，无法实现 |
 
 ---
 
@@ -291,8 +302,10 @@ reviewcrew/
 
 | 风险 | 对策 |
 |---|---|
+| **12h 时间硬约束** | 严格按 §10.1 范围裁切执行；每个阶段到期强制收敛，不恋战；砍掉离线层/信号层降低复杂度 |
 | GLM 长上下文注意力稀释 | 子 Agent 独立上下文 + 32K 预算裁剪 |
 | API 限流导致超时 | 并发信号量 + watchdog 强制收敛 + 结果缓存 |
 | 逻辑类漏洞命中率低 | 意图信号强化 + 变更前后语义对比 + 针对 miss 案例专项归因 |
-| Semgrep 对某语言弱 | SignalProvider 可插拔，信号缺失时 Agent 纯推理兜底 |
+| Semgrep 对某语言弱 | ~~SignalProvider 可插拔~~ 12h 版已砍掉信号层，纯 Agent 推理 |
 | 评测判定有歧义 | judge 用"行区间匹配 → LLM 语义比对"两级判定，人工抽检校准 |
+| 无离线索引导致上下文不足 | Agent 工具箱（read_file/git_blame）按需拉取，代价是多 1-2 轮工具调用 |
