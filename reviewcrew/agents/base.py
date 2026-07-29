@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import inspect
 from hashlib import sha256
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterable, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import ValidationError
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.messages import AgentStreamEvent, FunctionToolCallEvent
 from pydantic_ai.models import Model
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from reviewcrew.config import Config
 from reviewcrew.hooks import HookContext, HookManager
@@ -83,6 +86,12 @@ class AgentRuntime:
     _request_count: int = field(default=0, init=False)
     run_records: list[RuntimeRecord] = field(default_factory=list, init=False)
 
+    @property
+    def request_count(self) -> int:
+        """返回运行时已实际发出的模型请求数。"""
+
+        return self._request_count
+
     def compose_prompt(
         self,
         *,
@@ -125,6 +134,7 @@ class AgentRuntime:
         dynamic_context: str,
         budget: Budget,
         output_type: type[Any],
+        tools: Sequence[Any] = (),
     ) -> Any:
         """通过统一的 Prompt、预算和重试路径执行结构化模型请求。"""
 
@@ -136,11 +146,25 @@ class AgentRuntime:
             output_schema=output_type.__name__,
             model_name=model.model_name,
         )
-        self._consume_request(budget)
-        agent = Agent(model, output_type=output_type, retries=self.config.llm_max_retries)
+        effective_budget = self.budget or budget
+        if effective_budget.remaining_requests <= 0:
+            raise RuntimeError("模型请求数已达到预算上限")
+        usage = RunUsage()
+        agent = Agent(model, output_type=output_type, retries=self.config.llm_max_retries, tools=tools)
         if self.hook_manager is not None:
             await self.hook_manager.run("before_agent", HookContext(role=role))
-        result = await agent.run(prompt)
+        try:
+            result = await agent.run(
+                prompt,
+                usage=usage,
+                usage_limits=UsageLimits(request_limit=effective_budget.remaining_requests),
+                event_stream_handler=self._tool_event_handler(role) if self.event_sink is not None else None,
+            )
+        except UsageLimitExceeded as error:
+            raise RuntimeError("模型请求数已达到预算上限") from error
+        finally:
+            for _ in range(usage.requests):
+                self._consume_request(budget)
         if self.hook_manager is not None:
             await self.hook_manager.run("after_agent", HookContext(role=role))
         return result.output
@@ -226,6 +250,16 @@ class AgentRuntime:
         result = self.event_sink(event_name, data)
         if inspect.isawaitable(result):
             await result
+
+    def _tool_event_handler(self, role: str) -> Callable[[RunContext[Any], AsyncIterable[AgentStreamEvent]], Awaitable[None]]:
+        """将真实函数工具调用转换为不含参数的运行时事件。"""
+
+        async def handle(_: RunContext[Any], events: AsyncIterable[AgentStreamEvent]) -> None:
+            async for event in events:
+                if isinstance(event, FunctionToolCallEvent):
+                    await self.record_tool_call(role, event.part.tool_name)
+
+        return handle
 
     @staticmethod
     def _collaboration_arguments(

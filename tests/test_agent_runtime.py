@@ -109,6 +109,32 @@ class Verifier(VerifierProtocol):
         ]
 
 
+class SensitiveToolTestModel(TestModel):
+    """为真实工具生命周期生成包含敏感字段的调用参数。"""
+
+    def gen_tool_args(self, tool_def):  # type: ignore[no-untyped-def]
+        if tool_def.name == "read_file":
+            return {"path": "/private/secret.py", "access_token": "sensitive-test-token"}
+        return super().gen_tool_args(tool_def)
+
+
+class RecoveringStructuredOutputModel(TestModel):
+    """第一次返回非法结构，收到重试后返回合法结构。"""
+
+    def __init__(self) -> None:
+        super().__init__(custom_output_args={"summary": "已恢复", "budget_seconds": 1})
+        self.request_calls = 0
+
+    async def request(self, messages, model_settings, model_request_parameters):  # type: ignore[no-untyped-def]
+        self.request_calls += 1
+        self.custom_output_args = (
+            {"summary": "非法计划", "budget_seconds": 0}
+            if self.request_calls == 1
+            else {"summary": "已恢复", "budget_seconds": 1}
+        )
+        return await super().request(messages, model_settings, model_request_parameters)
+
+
 @pytest.mark.asyncio
 async def test_runtime_returns_valid_structured_expert_and_verifier_outputs() -> None:
     """运行时接受合法结构化结果并交给校验器。"""
@@ -158,6 +184,74 @@ async def test_runtime_records_tool_event_without_tool_arguments() -> None:
     await runtime.record_tool_call("defect", "read_file")
 
     assert events == [("agent.tool", {"role": "defect", "tool_name": "read_file"})]
+
+
+@pytest.mark.asyncio
+async def test_runtime_emits_redacted_event_from_real_pydantic_ai_tool_lifecycle(tmp_path) -> None:
+    """真实函数工具调用只向运行时事件暴露角色和工具名。"""
+
+    shared = tmp_path / "shared.md"
+    role_prompt = tmp_path / "role.md"
+    shared.write_text("共享规则", encoding="utf-8")
+    role_prompt.write_text("角色提示", encoding="utf-8")
+    events: list[tuple[str, dict[str, object]]] = []
+    tool_arguments: list[tuple[str, str]] = []
+
+    async def capture(name: str, data: dict[str, object]) -> None:
+        events.append((name, data))
+
+    async def read_file(path: str, access_token: str) -> str:
+        tool_arguments.append((path, access_token))
+        return "文件内容"
+
+    runtime = AgentRuntime(event_sink=capture)
+    output = await runtime.run_structured(
+        SensitiveToolTestModel(
+            call_tools=["read_file"],
+            custom_output_args={"summary": "工具调用完成", "budget_seconds": 1},
+        ),
+        role="defect",
+        sources=[PromptSource("shared", shared), PromptSource("role", role_prompt)],
+        skills=[],
+        dynamic_context="上下文",
+        budget=Budget(seconds=60),
+        output_type=ReviewPlan,
+        tools=[read_file],
+    )
+
+    assert output.summary == "工具调用完成"
+    assert tool_arguments == [("/private/secret.py", "sensitive-test-token")]
+    assert events == [("agent.tool", {"role": "defect", "tool_name": "read_file"})]
+    assert "/private/secret.py" not in repr(events)
+    assert "sensitive-test-token" not in repr(events)
+
+
+@pytest.mark.asyncio
+async def test_runtime_recovers_after_one_invalid_structured_output_and_counts_both_requests(tmp_path) -> None:
+    """结构化输出首次非法时重试一次，并精确记录两次模型请求。"""
+
+    shared = tmp_path / "shared.md"
+    role_prompt = tmp_path / "role.md"
+    shared.write_text("共享规则", encoding="utf-8")
+    role_prompt.write_text("角色提示", encoding="utf-8")
+    budget = Budget(seconds=60, max_requests=2)
+    model = RecoveringStructuredOutputModel()
+    runtime = AgentRuntime(config=Config(llm_max_retries=1))
+
+    output = await runtime.run_structured(
+        model,
+        role="team_lead",
+        sources=[PromptSource("shared", shared), PromptSource("role", role_prompt)],
+        skills=[],
+        dynamic_context="上下文",
+        budget=budget,
+        output_type=ReviewPlan,
+    )
+
+    assert output.summary == "已恢复"
+    assert model.request_calls == 2
+    assert runtime.request_count == 2
+    assert budget.requests_used == 2
 
 
 @pytest.mark.asyncio

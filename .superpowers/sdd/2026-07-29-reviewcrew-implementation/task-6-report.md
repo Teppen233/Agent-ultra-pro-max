@@ -55,3 +55,25 @@
 - 依赖约束已收紧为 `pydantic-ai>=2.20,<3`；新增模型配置、smoke、运行审计、路由、分片、Hook 与 Skill 变更哈希测试。
 
 验证：专项测试 20 passed；全量测试 46 passed（2.91s）。
+
+## 修复轮次 2
+
+基线提交：`fdddbcc`。本轮只关闭复审剩余的测试覆盖 Important。
+
+### RED
+
+新增两个真实边界测试后运行：
+
+```powershell
+& 'C:\Users\SXF-Admin\miniconda3\envs\reviewcrew\python.exe' -m pytest tests/test_agent_runtime.py -k "real_pydantic_ai_tool_lifecycle or recovers_after_one_invalid" -vv
+```
+
+结果为 2 failed：真实工具生命周期测试因 `run_structured()` 尚不接受工具而失败；结构化输出已由 Pydantic AI 完成一次重试并恢复，但运行时请求计数仍为 1，证明两个缺口均被测试准确捕获。
+
+### GREEN
+
+- 使用 Pydantic AI 2.20 `TestModel` 实际生成函数工具调用，工具函数确实收到敏感参数；运行时消费 `FunctionToolCallEvent` 后只发出角色和工具名，事件中不包含路径、凭据或工具返回内容。
+- 使用 `TestModel` 官方覆写方式让结构化输出第一次非法、第二次合法；断言恰好发生 2 次模型请求、1 次校验重试，并将运行时计数与共享预算精确同步为 2。
+- `AgentRuntime.run_structured()` 仅增加工具传入、脱敏事件桥接、Pydantic AI 请求上限和实际请求计数；未修改 Team Lead、设计文档或文档目录。
+
+验证结果：新增边界测试 2 passed；`tests/test_agent_runtime.py` 14 passed；Task 6 专项 22 passed；全量 48 passed（3.24s）。`git diff --check` 通过，仅有现有 Windows 行尾转换提示。
