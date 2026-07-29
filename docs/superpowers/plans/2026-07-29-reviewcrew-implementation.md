@@ -724,37 +724,37 @@ git commit -m "feat: 提供审查接口与事件回放"
 - Produces: `judge_case(entry: DatasetEntry, result: ReviewResult) -> JudgeResult`
 - Produces: commands `--mode quick`, `--mode full`, `--case sentry-01`
 
-- [ ] **Step 1: 填入 5 个仓库的最小数据集骨架**
+- [x] **Step 1: 填入 5 个仓库的最小数据集骨架**
 
 每个仓库至少一个案例记录，未核对案例使用 `needs_review`，禁止使用伪 SHA 或伪成功链接冒充 `ready`。
 
-- [ ] **Step 2: 写 Dataset 校验测试**
+- [x] **Step 2: 写 Dataset 校验测试**
 
 `ready` 案例必须具有 fork、test PR、base/head、introducing/fixing commit、目标位置和漏洞描述。
 
-- [ ] **Step 3: 写三层 Judge 测试**
+- [x] **Step 3: 写三层 Judge 测试**
 
 覆盖文件不匹配、行区间直接命中、正负 10 行容差、语义不匹配和 Verifier 已拒绝。
 
-- [ ] **Step 4: 写 Fake Runner 测试**
+- [x] **Step 4: 写 Fake Runner 测试**
 
 `quick` 每仓库最多选择一个 ready 案例，输出 `cases.jsonl`、`summary.json` 和 `summary.md`。
 
-- [ ] **Step 5: 运行测试并确认失败**
+- [x] **Step 5: 运行测试并确认失败**
 
 Run: `pytest tests/test_benchmark_models.py tests/test_benchmark_judge.py tests/test_benchmark_runner.py -v`
 
-- [ ] **Step 6: 实现数据模型、Judge、Runner 和报告**
+- [x] **Step 6: 实现数据模型、Judge、Runner 和报告**
 
 主命中率只使用实际完成运行的 ready 案例。报告同时统计非目标 Finding、耗时、超时、Verifier 接受/拒绝和需要人工复核数。
 
-- [ ] **Step 7: 运行 Fake 快速评测**
+- [x] **Step 7: 运行 Fake 快速评测**
 
 Run: `python -m benchmark.runner --mode quick --runner fake`
 
 Expected: 生成结果目录，不访问网络。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```powershell
 git add benchmark tests/test_benchmark_models.py tests/test_benchmark_judge.py tests/test_benchmark_runner.py
@@ -787,33 +787,33 @@ git commit -m "feat: 实现 Greptile Benchmark 评测流程"
 - Consumes: Task 10 REST/SSE 路径。
 - Produces: `applyEvent(event: PipelineEvent): void`。
 
-- [ ] **Step 1: 初始化 Vue 3、TypeScript、Vite、Pinia 和 Vitest**
+- [x] **Step 1: 初始化 Vue 3、TypeScript、Vite、Pinia 和 Vitest**
 
 依赖保持最少；第一版不引入复杂图编辑器，三 Agent 拓扑使用 CSS Grid 和连线实现。
 
-- [ ] **Step 2: 写 Store 事件归约失败测试**
+- [x] **Step 2: 写 Store 事件归约失败测试**
 
 输入 `review.started → agent.started → agent.candidate → verifier.rejected → review.completed`，断言阶段、Agent、候选和最终状态正确。
 
-- [ ] **Step 3: 运行测试并确认失败**
+- [x] **Step 3: 运行测试并确认失败**
 
 Run: `npm test -- --run`
 
 Workdir: `web`
 
-- [ ] **Step 4: 实现 contracts、Store 和 API Client**
+- [x] **Step 4: 实现 contracts、Store 和 API Client**
 
 注释和用户文案使用中文。真实 SSE 和 Replay 都调用同一个 `applyEvent`。
 
-- [ ] **Step 5: 创建完整 Demo Replay**
+- [x] **Step 5: 创建完整 Demo Replay**
 
 Fixture 必须包含两个专家并行、至少两个候选、一个 Verifier 接受、一个拒绝和最终报告事件。
 
-- [ ] **Step 6: 实现四个页面和三个核心组件**
+- [x] **Step 6: 实现四个页面和三个核心组件**
 
 必须展示 PR 输入、阶段进度、600 秒预算、三 Agent 状态、工具摘要、Finding 证据、Verifier 结论、Benchmark 链接和 Replay 按钮。
 
-- [ ] **Step 7: 运行测试与生产构建**
+- [x] **Step 7: 运行测试与生产构建**
 
 Run: `npm test -- --run`
 
@@ -823,7 +823,7 @@ Workdir: `web`
 
 Expected: 全部成功。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```powershell
 git add web
@@ -840,19 +840,19 @@ git commit -m "feat: 实现 Vue 审查与评测控制台"
 **Interfaces:**
 - Verifies: `ContextPack → Finding → Verdict → ReviewResult → PipelineEvent → Vue Store`
 
-- [ ] **Step 1: 写 Fake 全链路测试**
+- [x] **Step 1: 写 Fake 全链路测试**
 
 使用临时 Git 仓库构造 base/head，运行 Orchestrator，断言报告、事件、结果文件和最终 Finding 都存在。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `pytest tests/test_end_to_end.py -v`
 
-- [ ] **Step 3: 修复跨模块协议差异**
+- [x] **Step 3: 修复跨模块协议差异**
 
 只能修复契约适配和真实缺陷，不在此任务中重新设计 Schema。
 
-- [ ] **Step 4: 运行全部后端和前端验证**
+- [x] **Step 4: 运行全部后端和前端验证**
 
 Run: `pytest -q`
 
@@ -862,13 +862,13 @@ Run: `npm run build`
 
 Workdir for npm: `web`
 
-- [ ] **Step 5: 执行真实 GLM smoke**
+- [x] **Step 5: 执行真实 GLM smoke**
 
 Run: `python -m reviewcrew.llm.glm --smoke`
 
 Expected: 有 Key 时成功；无 Key 时记录为待用户提供，不伪造成功。
 
-- [ ] **Step 6: 执行一个真实 PR 或本地提交审查**
+- [x] **Step 6: 执行一个真实 PR 或本地提交审查**
 
 先设置 `REVIEWCREW_SMOKE_REPO`、`REVIEWCREW_SMOKE_BASE`、`REVIEWCREW_SMOKE_HEAD`，然后运行：
 
@@ -876,7 +876,7 @@ Expected: 有 Key 时成功；无 Key 时记录为待用户提供，不伪造成
 
 Expected: 600 秒内生成 `result.json`、`report.md` 和 `events.jsonl`。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```powershell
 git add tests/test_end_to_end.py reviewcrew web/src/api/client.ts
@@ -887,36 +887,37 @@ git commit -m "test: 验证全栈审查工作流"
 
 **Files:**
 - Create: `README.md`
+- Create: `docs/知识库维护方案.md`
 - Create: `docs/评测报告.md`
-- Create: `docs/演示脚本.md`
+- Create: `docs/三分钟演示脚本.md`
 
 **Interfaces:**
 - Documents: 安装、配置、CLI、服务端、前端、Benchmark、Replay、降级和故障排查。
 
-- [ ] **Step 1: 编写 README**
+- [x] **Step 1: 编写 README**
 
 必须提供 PowerShell 命令：创建虚拟环境、安装 Python、安装前端、配置 `.env`、运行测试、运行 CLI、启动 FastAPI、启动 Vue、运行 Benchmark。
 
-- [ ] **Step 2: 编写知识库维护方案**
+- [x] **Step 2: 编写知识库维护方案**
 
 明确第一版使用文档、测试、配置和 Git 历史；说明合并触发的增量索引方案属于维护设计，禁止宣称未实现能力已上线。
 
-- [ ] **Step 3: 编写评测报告模板并填入真实结果**
+- [x] **Step 3: 编写评测报告模板并填入真实结果**
 
 每行包含仓库、语言、测试 PR、上游修复 PR、目标漏洞、是否命中、Finding 定位、耗时和 Replay 标识。未运行和失败必须明确。
 
-- [ ] **Step 4: 编写三分钟演示脚本**
+- [x] **Step 4: 编写三分钟演示脚本**
 
 固定分镜：痛点 20 秒、启动 PR 20 秒、并行审查 50 秒、Verifier 35 秒、Finding 35 秒、Benchmark 30 秒、优势总结 20 秒。
 
-- [ ] **Step 5: 验证 README 命令和链接**
+- [x] **Step 5: 验证 README 命令和链接**
 
 在干净终端至少执行安装后的测试、CLI Fake 模式和前端构建。检查所有成功 PR 链接可访问。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```powershell
-git add README.md docs/评测报告.md docs/演示脚本.md
+git add README.md docs/知识库维护方案.md docs/评测报告.md docs/三分钟演示脚本.md
 git commit -m "docs: 补充安装评测与演示说明"
 ```
 

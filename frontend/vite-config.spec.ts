@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import config from '../vite.config'
+import config from './vite.config'
 
 describe('Vite 开发服务', () => {
   it('把同源 /api 请求代理到本地 FastAPI', () => {
