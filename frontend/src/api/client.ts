@@ -1,0 +1,185 @@
+import type {
+  BenchmarkSummary,
+  EventType,
+  PipelineEvent,
+  ReviewRequest,
+  ReviewResult,
+  RunsResponse,
+  StartReviewResponse,
+} from '@/contracts'
+
+type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+interface EventSourceLike {
+  onopen: (() => void) | null
+  onmessage: ((event: MessageEvent<string>) => void) | null
+  onerror: (() => void) | null
+  close(): void
+}
+
+interface SubscriptionHandlers {
+  onEvent(event: PipelineEvent): void
+  onOpen?(): void
+  onDisconnect?(): void
+  onError?(message: string): void
+}
+
+interface SubscriptionOptions {
+  replay?: boolean
+  speed?: number
+  factory?: (url: string) => EventSourceLike
+}
+
+interface ReplayOptions {
+  speed?: number
+  wait?: (milliseconds: number) => Promise<void>
+}
+
+const eventTypes = new Set<EventType>([
+  'review.started', 'review.completed', 'review.failed',
+  'stage.started', 'stage.completed', 'stage.failed',
+  'agent.started', 'agent.tool', 'agent.candidate', 'agent.completed', 'agent.failed',
+  'verifier.started', 'verifier.accepted', 'verifier.rejected', 'verifier.completed',
+  'report.generated',
+])
+
+const configuredBase = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/$/, '')
+
+const apiUrl = (path: string): string => `${configuredBase}${path}`
+
+const readError = async (response: Response): Promise<string> => {
+  try {
+    const body = await response.json() as { detail?: unknown }
+    if (typeof body.detail === 'string') return body.detail
+  } catch {
+    // 非 JSON 响应统一转为稳定中文提示，不向用户暴露代理或服务器原文。
+  }
+  return `请求失败（HTTP ${response.status}），请稍后重试。`
+}
+
+const requestJson = async <T>(path: string, init?: RequestInit, fetcher: Fetcher = fetch): Promise<T> => {
+  const response = await fetcher(apiUrl(path), init)
+  if (!response.ok) throw new Error(await readError(response))
+  return response.json() as Promise<T>
+}
+
+const asPipelineEvent = (value: unknown): PipelineEvent => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('事件格式无效。')
+  const event = value as Record<string, unknown>
+  if (
+    typeof event.id !== 'string'
+    || typeof event.run_id !== 'string'
+    || typeof event.sequence !== 'number'
+    || !Number.isInteger(event.sequence)
+    || event.sequence < 1
+    || typeof event.timestamp !== 'string'
+    || typeof event.type !== 'string'
+    || !eventTypes.has(event.type as EventType)
+    || !event.data
+    || typeof event.data !== 'object'
+    || Array.isArray(event.data)
+  ) {
+    throw new Error('事件格式无效。')
+  }
+  return {
+    id: event.id,
+    run_id: event.run_id,
+    sequence: event.sequence,
+    timestamp: event.timestamp,
+    type: event.type as EventType,
+    data: event.data as Record<string, unknown>,
+  }
+}
+
+/** 启动真实 PR、本地提交或服务端 Replay 审查。 */
+export const startReview = (
+  request: ReviewRequest,
+  fetcher: Fetcher = fetch,
+): Promise<StartReviewResponse> => requestJson('/api/reviews', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(request),
+}, fetcher)
+
+/** 获取一次运行的最终或当前公开状态。 */
+export const fetchReview = (runId: string): Promise<ReviewResult> =>
+  requestJson(`/api/reviews/${encodeURIComponent(runId)}`)
+
+/** 获取有界历史运行列表。 */
+export const fetchRuns = (limit = 50, offset = 0): Promise<RunsResponse> =>
+  requestJson(`/api/runs?limit=${limit}&offset=${offset}`)
+
+/** 获取最近一次真实 Benchmark 摘要。 */
+export const fetchLatestBenchmark = (): Promise<BenchmarkSummary> =>
+  requestJson('/api/benchmarks/latest')
+
+/** 返回后端 Markdown 报告地址，供查看或下载。 */
+export const reportUrl = (runId: string): string =>
+  apiUrl(`/api/reviews/${encodeURIComponent(runId)}/report?format=markdown`)
+
+/** 从 JSONL fixture 解析脱敏后的公开事件。 */
+export const parseEventLog = (content: string): PipelineEvent[] => content
+  .split(/\r?\n/)
+  .filter((line) => line.trim().length > 0)
+  .map((line) => asPipelineEvent(JSON.parse(line) as unknown))
+  .sort((left, right) => left.sequence - right.sequence)
+
+/** 在浏览器本地播放 JSONL；真实 SSE 与离线演示最终都调用同一个 applyEvent。 */
+export const replayEventLog = async (
+  content: string,
+  onEvent: (event: PipelineEvent) => void,
+  options: ReplayOptions = {},
+): Promise<void> => {
+  const speed = options.speed ?? 4
+  if (!Number.isFinite(speed) || speed <= 0) throw new Error('回放速度必须大于零。')
+  const wait = options.wait ?? ((milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)))
+  const events = parseEventLog(content)
+  let previous: PipelineEvent | undefined
+  for (const event of events) {
+    if (previous) {
+      const gap = Math.max(0, Date.parse(event.timestamp) - Date.parse(previous.timestamp))
+      await wait(Math.min(1800, gap / speed))
+    }
+    onEvent(event)
+    previous = event
+  }
+}
+
+/**
+ * 建立实时或服务端 Replay SSE。浏览器错误时保留连接让 EventSource 自动重连；
+ * 收到终态后主动关闭，避免终态之后被重复连接污染。
+ */
+export const createEventSubscription = (
+  runId: string,
+  handlers: SubscriptionHandlers,
+  options: SubscriptionOptions = {},
+): { close(): void } => {
+  const path = options.replay
+    ? `/api/replays/${encodeURIComponent(runId)}/events?speed=${options.speed ?? 1}`
+    : `/api/reviews/${encodeURIComponent(runId)}/events`
+  const factory = options.factory ?? ((url: string) => new EventSource(url))
+  const source = factory(apiUrl(path))
+  let closed = false
+
+  const close = (): void => {
+    if (closed) return
+    closed = true
+    source.close()
+  }
+
+  source.onopen = () => handlers.onOpen?.()
+  source.onerror = () => {
+    if (!closed) handlers.onDisconnect?.()
+  }
+  source.onmessage = (message: MessageEvent<string>) => {
+    try {
+      const event = asPipelineEvent(JSON.parse(message.data) as unknown)
+      handlers.onEvent(event)
+      if (event.type === 'review.completed' || event.type === 'review.failed') close()
+    } catch {
+      handlers.onError?.('收到无法识别的审查事件，已跳过。')
+    }
+  }
+
+  return { close }
+}
