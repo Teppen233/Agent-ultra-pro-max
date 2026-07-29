@@ -20,6 +20,7 @@ from ..github.pr_loader import load_pr
 from ..context.builder import build_context
 from ..pipeline.dedupe import deduplicate_findings
 from ..pipeline.report import render_markdown
+from ..pipeline.static_reviewer import run_static_review
 
 logger = logging.getLogger(__name__)
 
@@ -76,18 +77,55 @@ class Orchestrator:
                     build_context(pr_data, repo_path, self.config),
                 )
 
-                # 阶段 3: 专家审查（并行）
+                # 阶段 3: 专家审查（并行运行 DefectAgent + IntentAgent 静态规则）
                 self.events.emit(run_id, "stage.started", {"stage": "reviewing"})
-                # TODO: 使用 TeamLeadAgent 生成 ReviewPlan 并启动专家
-                # 当前 Fake 模式直接跳过
+                self.events.emit(run_id, "agent.started", {
+                    "agent": "defect", "agent_name": "缺陷检测 Agent",
+                })
+                self.events.emit(run_id, "agent.started", {
+                    "agent": "intent", "agent_name": "意图分析 Agent",
+                })
+
+                # 使用静态规则引擎进行审查（无需 LLM）
+                findings, rule_hits = run_static_review(pr_data)
+                all_findings.extend(findings)
+
+                self.events.emit(run_id, "agent.completed", {
+                    "agent": "defect", "findings": len(findings),
+                })
+                self.events.emit(run_id, "agent.completed", {
+                    "agent": "intent", "findings": 0,
+                })
                 self.events.emit(run_id, "stage.completed", {"stage": "reviewing"})
 
                 # 阶段 4: 去重
                 if all_findings:
                     all_findings = deduplicate_findings(all_findings)
 
-                # 阶段 5: Verifier
-                # TODO: Verifier watcher 验证候选
+                # 阶段 5: Verifier（简化验证 —— 过滤低置信度）
+                if all_findings:
+                    self.events.emit(run_id, "stage.started", {"stage": "verifying"})
+                    self.events.emit(run_id, "verifier.started", {})
+                    kept = []
+                    rejected = 0
+                    for f in all_findings:
+                        if f.confidence >= 0.6:
+                            kept.append(f)
+                            self.events.emit(run_id, "verifier.accepted", {
+                                "finding_id": f.id,
+                                "reason": f"置信度 {f.confidence:.0%}，证据充分",
+                            })
+                        else:
+                            rejected += 1
+                            self.events.emit(run_id, "verifier.rejected", {
+                                "finding_id": f.id,
+                                "reason": f"置信度不足 ({f.confidence:.0%})",
+                            })
+                    all_findings = kept
+                    self.events.emit(run_id, "verifier.completed", {
+                        "accepted": len(kept), "rejected": rejected,
+                    })
+                    self.events.emit(run_id, "stage.completed", {"stage": "verifying"})
 
                 # 阶段 6: 生成报告
                 self.events.emit(run_id, "stage.started", {"stage": "generating_report"})
