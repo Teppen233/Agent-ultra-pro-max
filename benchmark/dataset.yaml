@@ -1,0 +1,87 @@
+# Greptile Benchmark 案例清单（MVP 5 案例）
+# 状态: ready | needs_review | unavailable
+
+- id: sentry-01
+  language: python
+  upstream_repo: https://github.com/getsentry/sentry
+  fork_repo: https://github.com/Teppen233/sentry-reviewcrew
+  source_fix_pr: ""
+  test_pr: ""
+  base_sha: ""
+  head_sha: ""
+  introducing_commit: ""
+  fixing_commit: ""
+  title: Sentry 案例 01
+  bug_description: 待从 Greptile Case Library 确认
+  severity: high
+  category: logic
+  bug_locations: []
+  status: needs_review
+
+- id: calcom-01
+  language: typescript
+  upstream_repo: https://github.com/calcom/cal.com
+  fork_repo: https://github.com/Teppen233/calcom-reviewcrew
+  source_fix_pr: ""
+  test_pr: ""
+  base_sha: ""
+  head_sha: ""
+  introducing_commit: ""
+  fixing_commit: ""
+  title: Cal.com 案例 01
+  bug_description: 待从 Greptile Case Library 确认
+  severity: high
+  category: logic
+  bug_locations: []
+  status: needs_review
+
+- id: grafana-01
+  language: go
+  upstream_repo: https://github.com/grafana/grafana
+  fork_repo: https://github.com/Teppen233/grafana-reviewcrew
+  source_fix_pr: ""
+  test_pr: ""
+  base_sha: ""
+  head_sha: ""
+  introducing_commit: ""
+  fixing_commit: ""
+  title: Grafana 案例 01
+  bug_description: 待从 Greptile Case Library 确认
+  severity: high
+  category: logic
+  bug_locations: []
+  status: needs_review
+
+- id: keycloak-01
+  language: java
+  upstream_repo: https://github.com/keycloak/keycloak
+  fork_repo: https://github.com/Teppen233/keycloak-reviewcrew
+  source_fix_pr: ""
+  test_pr: ""
+  base_sha: ""
+  head_sha: ""
+  introducing_commit: ""
+  fixing_commit: ""
+  title: Keycloak 案例 01
+  bug_description: 待从 Greptile Case Library 确认
+  severity: high
+  category: logic
+  bug_locations: []
+  status: needs_review
+
+- id: discourse-01
+  language: ruby
+  upstream_repo: https://github.com/discourse/discourse
+  fork_repo: https://github.com/Teppen233/discourse-reviewcrew
+  source_fix_pr: ""
+  test_pr: ""
+  base_sha: ""
+  head_sha: ""
+  introducing_commit: ""
+  fixing_commit: ""
+  title: Discourse 案例 01
+  bug_description: 待从 Greptile Case Library 确认
+  severity: high
+  category: logic
+  bug_locations: []
+  status: needs_review
