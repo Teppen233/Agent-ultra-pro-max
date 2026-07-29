@@ -82,9 +82,15 @@ class ExpertAgent:
         self._handled_handoffs.clear()
         self._handled_evidence.clear()
         publisher = self._publisher or (MessagePublisher(mailbox=mailbox, blackboard=blackboard) if mailbox is not None or blackboard is not None else None)
+        latest_snapshot = AgentSnapshot(
+            agent_id=agent_id,
+            pending_checks=self._checks(),
+            warnings=["专家在预算边界前尚未完成模型审查。"],
+        )
         try:
             snapshot = await self._review(context, agent_id, effective_budget)
             snapshot = self._normalize_snapshot(snapshot, context, agent_id)
+            latest_snapshot = snapshot
             await self._publish_findings(snapshot, context, publisher)
             await self._respond_to_requests(
                 snapshot, context, mailbox, blackboard, publisher, effective_budget, deadline
@@ -102,6 +108,16 @@ class ExpertAgent:
             )
             return snapshot
         except asyncio.CancelledError:
+            await asyncio.shield(
+                self._publish(
+                    context,
+                    publisher,
+                    kind="agent_snapshot",
+                    recipient="orchestrator",
+                    key="snapshot",
+                    payload={"snapshot": latest_snapshot.model_dump(mode="json")},
+                )
+            )
             await asyncio.shield(self._publish(context, publisher, kind="agent_failed", recipient="*", key="failed", payload={"agent_id": agent_id, "role": self.role, "context_id": context.id, "warning": "专家已取消。"}))
             raise
         except Exception:
@@ -361,7 +377,7 @@ class ExpertAgent:
         context: ContextPack,
         publisher: MessagePublisher | None,
         *,
-        kind: Literal["candidate_finding", "handoff_response", "evidence_response", "agent_completed", "agent_failed"],
+        kind: Literal["candidate_finding", "handoff_response", "evidence_response", "agent_snapshot", "agent_completed", "agent_failed"],
         recipient: str,
         key: str,
         payload: dict[str, Any],

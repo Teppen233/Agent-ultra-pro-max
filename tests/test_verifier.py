@@ -660,6 +660,37 @@ async def test_watch_waits_for_every_expected_shard_instance(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_real_watcher_ignores_stop_until_expected_terminals_and_queued_candidate_are_consumed(tmp_path) -> None:
+    """实例集合非空时，stop_event 不得跳过已排队候选和终态。"""
+
+    mailbox = Mailbox(tmp_path, "run-stop-race")
+    publisher = MessagePublisher(mailbox=mailbox, blackboard=None)
+    finding = make_finding("finding-stop-race")
+    await publish_candidate(publisher, finding)
+    for agent_id in ("defect:ctx-a", "intent:ctx-b"):
+        await publisher.publish(
+            sender=agent_id,
+            recipient="verifier",
+            kind="agent_completed",
+            key="completed",
+            payload={"agent_id": agent_id, "role": agent_id.split(":", 1)[0]},
+        )
+    stop_event = asyncio.Event()
+    stop_event.set()
+    model = TestModel(custom_output_args=make_verdict(accepted=True, verdict="confirmed", confidence=0.9, reason="已验证"))
+
+    verdicts = await VerifierAgent(model=model).watch(
+        mailbox,
+        EvidenceBlackboard("run-stop-race"),
+        Budget(seconds=2),
+        expected_agent_ids={"defect:ctx-a", "intent:ctx-b"},
+        stop_event=stop_event,
+    )
+
+    assert [item.finding_id for item in verdicts] == [finding.id]
+
+
+@pytest.mark.asyncio
 async def test_watch_accepts_explicit_stop_event_without_expected_agents(tmp_path) -> None:
     """调用方未提供实例集合时，可用显式停止事件安全结束 watcher。"""
 

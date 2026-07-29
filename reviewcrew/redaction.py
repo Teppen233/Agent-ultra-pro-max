@@ -6,17 +6,19 @@ import re
 from typing import Any
 
 
-_SENSITIVE_KEY_PARTS = (
-    "reasoning",
+_SENSITIVE_KEYS = {
+    "reasoning_summary",
     "prompt",
+    "raw_prompt",
     "raw_response",
     "model_response",
     "chain_of_thought",
     "思维链",
     "模型响应",
-)
+}
 _SENSITIVE_TEXT = re.compile(
-    r"reasoning_summary|chain[-_ ]of[-_ ]thought|prompt|模型响应|响应|思维链",
+    r"reasoning_summary|chain[-_ ]of[-_ ]thought|raw_response|"
+    r"(?:完整|full)\s*(?:prompt|模型响应)|思维链",
     re.IGNORECASE,
 )
 
@@ -34,7 +36,7 @@ def sanitize_persisted_value(value: Any) -> Any:
         sanitized: dict[str, Any] = {}
         for key, item in value.items():
             normalized = key.casefold()
-            if any(part in normalized for part in _SENSITIVE_KEY_PARTS):
+            if normalized in _SENSITIVE_KEYS:
                 continue
             sanitized[key] = sanitize_persisted_value(item)
         return sanitized

@@ -526,3 +526,26 @@ async def test_cancelled_expert_publishes_only_failed_terminal(tmp_path) -> None
 
     assert len(blackboard.by_kind("agent_failed")) == 1
     assert blackboard.by_kind("agent_completed") == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_real_expert_publishes_snapshot_before_unique_failed_terminal(tmp_path) -> None:
+    """真实专家在预算取消边界先发布安全快照，再发布唯一失败终态。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    class BlockingDefect(DefectAgent):
+        async def _review(self, context, agent_id, budget):  # type: ignore[no-untyped-def]
+            await asyncio.Future()
+
+    mailbox = Mailbox(tmp_path, "run-budget-snapshot")
+    blackboard = EvidenceBlackboard("run-budget-snapshot")
+    task = asyncio.create_task(BlockingDefect().run(make_context(), mailbox=mailbox, blackboard=blackboard))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(blackboard.by_kind("agent_snapshot")) == 1
+    assert blackboard.by_kind("agent_snapshot")[0].payload["snapshot"]["agent_id"] == "defect:ctx-sql"
+    assert len(blackboard.by_kind("agent_failed")) == 1

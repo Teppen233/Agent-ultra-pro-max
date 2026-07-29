@@ -796,13 +796,12 @@ async def test_reporting_timeout_finishes_all_writes_and_persists_same_partial_r
 
     active = False
 
-    def slow_persister(result, runs_directory):
+    def slow_renderer(result):
         nonlocal active
         active = True
         time.sleep(0.03)
-        paths = persist_report(result, runs_directory)
         active = False
-        return paths
+        return "已渲染"
 
     result = await Orchestrator(
         Config(runs_dir=tmp_path / "runs"),
@@ -812,7 +811,7 @@ async def test_reporting_timeout_finishes_all_writes_and_persists_same_partial_r
         defect_factory=lambda publisher: SnapshotExpert("defect"),
         intent_factory=lambda publisher: SnapshotExpert("intent"),
         verifier_factory=lambda publisher: EmptyVerifier(),
-        report_persister=slow_persister,
+        report_renderer=slow_renderer,
         stage_timeouts={"reporting": 0.01},
     ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
 
@@ -829,9 +828,18 @@ async def test_reporting_timeout_finishes_all_writes_and_persists_same_partial_r
 async def test_elapsed_seconds_includes_report_finalization(tmp_path: Path) -> None:
     """最终结果与报告中的总耗时必须覆盖报告生成耗时。"""
 
-    def slow_persister(result, runs_directory):
-        time.sleep(0.03)
+    calls = 0
+
+    def one_shot_persister(result, runs_directory):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise RuntimeError("持久化器不可重复调用")
         return persist_report(result, runs_directory)
+
+    def slow_renderer(result):
+        time.sleep(0.03)
+        return "已渲染"
 
     result = await Orchestrator(
         Config(runs_dir=tmp_path / "runs"),
@@ -841,7 +849,8 @@ async def test_elapsed_seconds_includes_report_finalization(tmp_path: Path) -> N
         defect_factory=lambda publisher: SnapshotExpert("defect"),
         intent_factory=lambda publisher: SnapshotExpert("intent"),
         verifier_factory=lambda publisher: EmptyVerifier(),
-        report_persister=slow_persister,
+        report_persister=one_shot_persister,
+        report_renderer=slow_renderer,
         stage_timeouts={"reporting": 1},
     ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
 
@@ -850,6 +859,36 @@ async def test_elapsed_seconds_includes_report_finalization(tmp_path: Path) -> N
     )
     assert result.elapsed_seconds >= 0.03
     assert persisted["elapsed_seconds"] == result.elapsed_seconds
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_report_commit_failure_returns_partial_without_report_generated_claim(tmp_path: Path) -> None:
+    """唯一最终提交失败时返回 partial，且不得声称报告存在。"""
+
+    calls = 0
+
+    def failing_persister(result, runs_directory):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("不可写")
+
+    result = await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+        report_persister=failing_persister,
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    events = Orchestrator.read_events(tmp_path / "runs", result.run_id)
+    assert calls == 1
+    assert result.status == "partial"
+    assert not (tmp_path / "runs" / result.run_id / "result.json").exists()
+    assert not any(event.type == "report.generated" for event in events)
 
 
 @pytest.mark.asyncio
@@ -858,8 +897,8 @@ async def test_entire_run_directory_redacts_sensitive_structured_output_text(tmp
 
     finding = make_finding().model_copy(
         update={
-            "title": "Prompt 泄漏 sensitive-prompt",
-            "description": "模型响应 sensitive-response",
+            "title": "完整 Prompt 泄漏 sensitive-prompt",
+            "description": "raw_response sensitive-response",
             "reasoning_summary": "思维链 sensitive-chain",
         }
     )
@@ -869,7 +908,7 @@ async def test_entire_run_directory_redacts_sensitive_structured_output_text(tmp
             return AgentSnapshot(
                 agent_id=f"defect:{context.id}",
                 findings=[finding],
-                warnings=["模型响应包含 sensitive-warning"],
+                warnings=["完整模型响应包含 sensitive-warning"],
             )
 
     class AcceptingVerifier:
@@ -904,8 +943,8 @@ async def test_entire_run_directory_redacts_sensitive_structured_output_text(tmp
     )
     for forbidden in (
         "reasoning_summary",
-        "Prompt",
-        "响应",
+        "完整 Prompt",
+        "raw_response",
         "思维链",
         "sensitive-prompt",
         "sensitive-response",

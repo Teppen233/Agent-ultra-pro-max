@@ -21,7 +21,7 @@ from reviewcrew.events import EventStore, PipelineEvent
 from reviewcrew.github.pr_loader import PRLoadError, load_pr
 from reviewcrew.pipeline.dedupe import deduplicate_findings
 from reviewcrew.redaction import sanitize_persisted_value
-from reviewcrew.report import persist_report
+from reviewcrew.report import persist_report, render_markdown
 from reviewcrew.schemas import (
     AgentSnapshot,
     Budget,
@@ -44,6 +44,7 @@ ContextBuilder = Callable[..., Awaitable[list[ContextPack]]]
 StaticAnalyzer = Callable[[PRData, list[ContextPack]], Awaitable[list[StaticSignal]]]
 AgentFactory = Callable[[MessagePublisher], object]
 ReportPersister = Callable[[ReviewResult, str | Path], tuple[Path, Path]]
+ReportRenderer = Callable[[ReviewResult], str]
 
 
 class TeamLeadProtocol(Protocol):
@@ -163,6 +164,7 @@ class Orchestrator:
         static_analyzer: StaticAnalyzer | None = None,
         event_store: EventStore | None = None,
         report_persister: ReportPersister = persist_report,
+        report_renderer: ReportRenderer = render_markdown,
         stage_timeouts: Mapping[str, float] | None = None,
         global_timeout_seconds: float | None = None,
         budget_grace_seconds: float = 5.0,
@@ -183,6 +185,7 @@ class Orchestrator:
         self._static_analyzer = static_analyzer
         self._events = event_store or EventStore(self.config.runs_dir)
         self._persist_report = report_persister
+        self._render_report = report_renderer
         self._global_timeout = global_timeout_seconds or float(self.config.global_timeout_seconds)
         self._budget_grace_seconds = max(0.0, budget_grace_seconds)
         self._timeouts = {
@@ -195,10 +198,19 @@ class Orchestrator:
             **dict(stage_timeouts or {}),
         }
 
-    async def review(self, request: ReviewRequest) -> ReviewResult:
+    async def review(
+        self,
+        request: ReviewRequest,
+        *,
+        run_id: str | None = None,
+    ) -> ReviewResult:
         """执行一次审查，并在任何超时路径上返回已持久化的 ReviewResult。"""
 
-        run_id = self._events.create_run()
+        if run_id is None:
+            run_id = self._events.create_run()
+        else:
+            # 服务端会先预留运行目录，以便 POST 在后台审查完成前返回稳定 ID。
+            self._events.read(run_id)
         started_at = datetime.now(UTC)
         mailbox = Mailbox(self.config.runs_dir, run_id)
         blackboard = EvidenceBlackboard(run_id)
@@ -244,7 +256,7 @@ class Orchestrator:
         draft = self._build_result(state)
         generation_error: Exception | None = None
         try:
-            self._persist_report(draft, self.config.runs_dir)
+            self._render_report(draft)
         except Exception as error:
             generation_error = error
 
@@ -259,10 +271,7 @@ class Orchestrator:
         result = self._build_result(state)
         generated = True
         try:
-            if generation_error is None:
-                self._persist_report(result, self.config.runs_dir)
-            else:
-                persist_report(result, self.config.runs_dir)
+            self._persist_report(result, self.config.runs_dir)
         except Exception as error:
             generated = False
             state.degraded = True

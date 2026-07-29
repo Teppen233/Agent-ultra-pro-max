@@ -92,7 +92,11 @@ class VerifierAgent:
                     message = (
                         deferred.popleft()
                         if deferred
-                        else await self._receive_or_stop(mailbox, stop_event, remaining)
+                        else await self._receive_or_stop(
+                            mailbox,
+                            stop_event if expected is None else None,
+                            remaining,
+                        )
                     )
                 except TimeoutError:
                     timed_out = True
@@ -416,8 +420,8 @@ class VerifierAgent:
 
         if deferred:
             return False
-        if expected_agent_ids is not None and expected_agent_ids.issubset(terminal_agent_ids):
-            return True
+        if expected_agent_ids is not None:
+            return expected_agent_ids.issubset(terminal_agent_ids)
         return stop_event is not None and stop_event.is_set()
 
     @staticmethod

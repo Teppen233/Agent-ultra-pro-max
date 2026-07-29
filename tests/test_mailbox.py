@@ -102,7 +102,9 @@ async def test_publisher_persists_redacted_candidate_but_delivers_full_payload(t
             "id": "finding-1",
             "title": "公开标题",
             "reasoning_summary": "私密思维链 sensitive-chain",
-            "description": "不得保存完整 Prompt 或模型响应 sensitive-response",
+            "description": "不得保存完整 Prompt sensitive-response",
+            "file": "src/prompt_builder.py",
+            "impact": "HTTP 响应头缺少 CSP",
         }
     }
 
@@ -118,5 +120,7 @@ async def test_publisher_persists_redacted_candidate_but_delivers_full_payload(t
     persisted = (tmp_path / "run-redacted" / "mailbox.jsonl").read_text(encoding="utf-8")
     assert delivered.payload["finding"]["reasoning_summary"] == "私密思维链 sensitive-chain"
     assert blackboard.messages[0].payload["finding"]["reasoning_summary"] == "私密思维链 sensitive-chain"
-    for forbidden in ("reasoning_summary", "sensitive-chain", "Prompt", "响应", "sensitive-response", "思维链"):
+    assert "src/prompt_builder.py" in persisted
+    assert "HTTP 响应头缺少 CSP" in persisted
+    for forbidden in ("reasoning_summary", "sensitive-chain", "完整 Prompt", "sensitive-response", "思维链"):
         assert forbidden not in persisted
