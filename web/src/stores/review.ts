@@ -36,6 +36,7 @@ interface ReviewState {
   replayTimer: number | null
   benchmarkCapacity: number
   benchmarkCount: number
+  benchmarkAvailable: boolean
 }
 
 export type ReplaySpeed = 0.5 | 1 | 2 | 4
@@ -89,6 +90,7 @@ export const useReviewStore = defineStore('review', {
     replayTimer: null,
     benchmarkCapacity: 5,
     benchmarkCount: 0,
+    benchmarkAvailable: false,
   }),
   getters: {
     retainedFindings: (state) =>
@@ -445,11 +447,19 @@ export const useReviewStore = defineStore('review', {
       if (response.ok) this.runs = (await response.json()) as RunSummary[]
     },
     async loadBenchmarkCapacity() {
-      const response = await fetch('/api/benchmark/entries')
-      if (!response.ok) return
-      const payload = (await response.json()) as BenchmarkCollection
-      this.benchmarkCapacity = payload.capacity
-      this.benchmarkCount = payload.count
+      try {
+        const response = await fetch('/api/benchmark/entries')
+        if (!response.ok) {
+          this.benchmarkAvailable = false
+          return
+        }
+        const payload = (await response.json()) as BenchmarkCollection
+        this.benchmarkCapacity = payload.capacity
+        this.benchmarkCount = payload.count
+        this.benchmarkAvailable = true
+      } catch {
+        this.benchmarkAvailable = false
+      }
     },
     loadDemo() {
       this.setReplaySource(demoEvents, true)

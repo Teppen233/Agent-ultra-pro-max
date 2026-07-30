@@ -113,6 +113,7 @@ watch(
         :loading="store.loading"
         :benchmark-count="store.benchmarkCount"
         :benchmark-capacity="store.benchmarkCapacity"
+        :benchmark-available="store.benchmarkAvailable"
         @submit="start"
         @demo="demo"
       />
@@ -189,7 +190,7 @@ watch(
               </template>
               <div v-if="store.runs.length" class="recent-list scrollbar">
                 <RouterLink v-for="run in store.runs" :key="run.run_id" :to="`/review/${run.run_id}`">
-                  <span class="mono" :title="run.run_id">{{ run.run_id }}</span><i :class="run.status" />
+                  <span :class="{ mono: !run.name }" :title="run.run_id">{{ run.name || run.run_id }}</span><i :class="run.status" />
                 </RouterLink>
               </div>
               <p v-else class="rail-empty">

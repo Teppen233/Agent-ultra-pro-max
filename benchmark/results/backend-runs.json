@@ -1,0 +1,73 @@
+[
+  {
+    "run_id": "6ac2df3bd182",
+    "name": "Greptile sentry PR #1 - Enhanced Pagination Performance for High-Volume Audit Logs",
+    "status": "done",
+    "repo": "ai-code-review-evaluation/sentry-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1"
+  },
+  {
+    "run_id": "1a956489ca08",
+    "name": "Greptile cal.com PR #2 - Async import of the appStore packages",
+    "status": "done",
+    "repo": "ai-code-review-evaluation/cal.com-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/2"
+  },
+  {
+    "run_id": "cedc6b8f61e5",
+    "name": "Greptile grafana PR #1 - Anonymous: Add configurable device limit",
+    "status": "done",
+    "repo": "ai-code-review-evaluation/grafana-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/1"
+  },
+  {
+    "run_id": "b0e8dcd209f5",
+    "name": "Greptile keycloak PR #1 - Fixing Re-authentication with passkeys",
+    "status": "done",
+    "repo": "ai-code-review-evaluation/keycloak-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1"
+  },
+  {
+    "run_id": "0a9b0373b192",
+    "name": "Greptile discourse PR #1 - FEATURE: automatically downsize large images",
+    "status": "done",
+    "repo": "ai-code-review-evaluation/discourse-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/1"
+  },
+  {
+    "run_id": "58ef5f3169a4",
+    "name": "Greptile sentry PR #2 - Optimize spans buffer insertion with eviction during insert",
+    "status": "done",
+    "repo": "ai-code-review-evaluation/sentry-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2"
+  },
+  {
+    "run_id": "38936331f97b",
+    "name": "Greptile cal.com PR #3 - feat: 2fa backup codes",
+    "status": "done",
+    "repo": "ai-code-review-evaluation/cal.com-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/3"
+  },
+  {
+    "run_id": "b34282e23ddd",
+    "name": "Greptile grafana PR #2 retry 2 - AuthZService: improve authz caching",
+    "status": "done",
+    "failed_attempt_run_id": "969972146ebf",
+    "repo": "ai-code-review-evaluation/grafana-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/grafana-greptile/pull/2"
+  },
+  {
+    "run_id": "32e301378949",
+    "name": "Greptile keycloak PR #2 - Add caching support for IdentityProviderStorageProvider .getForLogin operations",
+    "status": "done",
+    "repo": "ai-code-review-evaluation/keycloak-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/2"
+  },
+  {
+    "run_id": "0f60ed0ee477",
+    "name": "Greptile discourse PR #2 - FEATURE: per-topic unsubscribe option in emails",
+    "status": "done",
+    "repo": "ai-code-review-evaluation/discourse-greptile",
+    "pr_url": "https://github.com/ai-code-review-evaluation/discourse-greptile/pull/2"
+  }
+]

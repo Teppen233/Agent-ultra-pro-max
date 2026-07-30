@@ -17,7 +17,7 @@ The failed Grafana attempt remains available in the run history for audit purpos
 
 ## Backend Design
 
-The backend treats `benchmark/results/backend-runs.json` as the curated Greptile run manifest. A small loader validates every manifest item, resolves its run directory, and derives repository and pull-request identity from the run metadata source URL.
+The backend treats `benchmark/results/backend-runs.json` as the curated Greptile run manifest. Each self-contained manifest item includes its repository and pull-request URL. A small loader validates every item and resolves its run directory.
 
 `GET /api/benchmark/entries` returns the ten manifest runs in manifest order using the existing `BenchmarkCollection` shape. Its capacity is ten and its count is the number of valid manifest cases. Missing run directories are retained as non-ready entries only when enough metadata exists to identify the case; malformed manifest records are skipped rather than breaking the entire page.
 

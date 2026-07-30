@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { Play, WandSparkles } from 'lucide-vue-next'
 import { NButton, NCheckbox, NInput, NTooltip } from 'naive-ui'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = defineProps<{
   loading: boolean
   benchmarkCount?: number
   benchmarkCapacity?: number
+  benchmarkAvailable?: boolean
 }>()
 const emit = defineEmits<{
   submit: [prUrl: string, repoPath: string, addToBenchmark: boolean]
@@ -16,6 +17,19 @@ const emit = defineEmits<{
 const prUrl = ref('')
 const repoPath = ref('')
 const addToBenchmark = ref(false)
+const benchmarkFull = computed(
+  () => (props.benchmarkCount ?? 0) >= (props.benchmarkCapacity ?? 5),
+)
+const benchmarkHint = computed(() => {
+  if (!props.benchmarkAvailable) return 'Benchmark 服务暂不可用'
+  if (benchmarkFull.value) return 'Benchmark 已满，请先保留当前 5 个仓库'
+  return '审计成功后保存当前结果，不会重复运行'
+})
+const benchmarkCapacityLabel = computed(() =>
+  props.benchmarkAvailable
+    ? `${props.benchmarkCount ?? 0} / ${props.benchmarkCapacity ?? 5}`
+    : '暂不可用',
+)
 
 function isGithubPr(value: string): boolean {
   return /^https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+(?:[/?#].*)?$/i.test(value.trim())
@@ -43,16 +57,16 @@ function submit() {
           <NCheckbox
             v-model:checked="addToBenchmark"
             aria-label="加入 Benchmark"
-            :disabled="!isGithubPr(prUrl) || (props.benchmarkCount ?? 0) >= (props.benchmarkCapacity ?? 5)"
+            :disabled="!props.benchmarkAvailable || !isGithubPr(prUrl) || benchmarkFull"
           >
             加入 Benchmark
           </NCheckbox>
         </template>
-        {{ (props.benchmarkCount ?? 0) >= (props.benchmarkCapacity ?? 5)
-          ? 'Benchmark 已满，请先保留当前 5 个仓库'
-          : '审计成功后保存当前结果，不会重复运行' }}
+        {{ benchmarkHint }}
       </NTooltip>
-      <span class="benchmark-capacity">{{ props.benchmarkCount ?? 0 }} / {{ props.benchmarkCapacity ?? 5 }}</span>
+      <span class="benchmark-capacity">
+        {{ benchmarkCapacityLabel }}
+      </span>
     </div>
     <NButton attr-type="submit" type="primary" :loading="loading" :disabled="!prUrl.trim()">
       <template #icon>

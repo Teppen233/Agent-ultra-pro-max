@@ -118,6 +118,7 @@ describe('review workflow reducer', () => {
       })
       expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/benchmark/entries')
       expect([store.benchmarkCount, store.benchmarkCapacity]).toEqual([4, 5])
+      expect(store.benchmarkAvailable).toBe(true)
     } finally {
       store.stopSource()
       vi.unstubAllGlobals()

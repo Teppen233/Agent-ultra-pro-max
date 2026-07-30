@@ -94,9 +94,7 @@ def test_review_accepts_missing_repository_path(
         release_preparation.set()
         assert reviewed.wait(timeout=1)
 
-    assert preparation_calls == [
-        ("https://github.com/owner/repo/pull/42", None, repos_dir)
-    ]
+    assert preparation_calls == [("https://github.com/owner/repo/pull/42", None, repos_dir)]
 
 
 def test_replay_is_sse_and_run_detail(tmp_path: Path) -> None:
@@ -119,10 +117,25 @@ def test_runs_lists_completed_run(tmp_path: Path) -> None:
     [run] = client.get("/api/runs").json()
     assert run == {
         "run_id": "test123",
+        "name": None,
         "status": "done",
         "event_count": 3,
         "has_error": False,
     }
+
+
+def test_runs_expose_persisted_run_name(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    write_run(runs_dir)
+    metadata = {"name": "Greptile sentry PR #1", "source": "/tmp/pr-1.diff"}
+    runs_dir.joinpath("test123", "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    client = TestClient(create_app(runs_dir))
+
+    [run] = client.get("/api/runs").json()
+    detail = client.get("/api/runs/test123").json()
+    assert run["name"] == metadata["name"]
+    assert detail["name"] == metadata["name"]
 
 
 def test_runs_lists_failed_run_as_failed(tmp_path: Path) -> None:
@@ -136,9 +149,7 @@ def test_runs_lists_failed_run_as_failed(tmp_path: Path) -> None:
         status="error",
         text="context failed",
     )
-    directory.joinpath("events.jsonl").write_text(
-        event.model_dump_json() + "\n", encoding="utf-8"
-    )
+    directory.joinpath("events.jsonl").write_text(event.model_dump_json() + "\n", encoding="utf-8")
     directory.joinpath("error.json").write_text("{}", encoding="utf-8")
 
     [run] = TestClient(create_app(runs_dir)).get("/api/runs").json()
@@ -161,9 +172,7 @@ def test_run_detail_marks_orphaned_run_as_interrupted(tmp_path: Path) -> None:
             "status": "running",
         },
     )
-    directory.joinpath("events.jsonl").write_text(
-        event.model_dump_json() + "\n", encoding="utf-8"
-    )
+    directory.joinpath("events.jsonl").write_text(event.model_dump_json() + "\n", encoding="utf-8")
 
     detail = TestClient(create_app(runs_dir)).get("/api/runs/orphaned123").json()
 
@@ -188,6 +197,73 @@ def test_benchmark_entries_start_empty(tmp_path: Path) -> None:
         "count": 0,
         "entries": [],
     }
+
+
+def test_greptile_benchmark_manifest_exposes_named_runs(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    benchmark_dir = tmp_path / "benchmark"
+    write_run(runs_dir, "greptile1")
+    write_run(runs_dir, "greptile2")
+    write_run(runs_dir, "not-curated")
+    benchmark_dir.mkdir()
+    benchmark_dir.joinpath("backend-runs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "run_id": "greptile1",
+                    "name": "Greptile sentry PR #1 - Pagination",
+                    "status": "done",
+                    "repo": "ai-code-review-evaluation/sentry-greptile",
+                    "pr_url": (
+                        "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1"
+                    ),
+                },
+                {
+                    "run_id": "greptile2",
+                    "name": "Greptile sentry PR #2 - Buffer",
+                    "status": "done",
+                    "repo": "ai-code-review-evaluation/sentry-greptile",
+                    "pr_url": (
+                        "https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2"
+                    ),
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(runs_dir, benchmark_dir))
+
+    collection = client.get("/api/benchmark/entries").json()
+    detail = client.get("/api/benchmark/entries/greptile2")
+
+    assert collection["capacity"] == 10
+    assert collection["count"] == 2
+    assert [entry["name"] for entry in collection["entries"]] == [
+        "Greptile sentry PR #1 - Pagination",
+        "Greptile sentry PR #2 - Buffer",
+    ]
+    assert [entry["pr_number"] for entry in collection["entries"]] == [1, 2]
+    assert all(entry["status"] == "ready" for entry in collection["entries"])
+    assert detail.status_code == 200
+    assert detail.json()["run"]["run_id"] == "greptile2"
+    assert client.get("/api/benchmark/entries/not-curated").status_code == 404
+
+
+def test_greptile_benchmark_manifest_skips_invalid_rows(tmp_path: Path) -> None:
+    benchmark_dir = tmp_path / "benchmark"
+    benchmark_dir.mkdir()
+    benchmark_dir.joinpath("backend-runs.json").write_text(
+        json.dumps([{"run_id": "missing-fields"}]),
+        encoding="utf-8",
+    )
+
+    collection = (
+        TestClient(create_app(tmp_path / "runs", benchmark_dir))
+        .get("/api/benchmark/entries")
+        .json()
+    )
+
+    assert collection == {"capacity": 10, "count": 0, "entries": []}
 
 
 def test_benchmark_opt_in_requires_github_pull_request(tmp_path: Path) -> None:

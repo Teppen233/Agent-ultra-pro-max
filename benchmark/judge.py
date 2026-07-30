@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
 from reviewcrew.llm.glm import build_glm_model, build_model_settings
-from reviewcrew.models import Category, Finding
+from reviewcrew.models import Category, Finding, Severity
 
 
 class BugLocation(BaseModel):
@@ -25,9 +25,12 @@ class DatasetEntry(BaseModel):
     pr_url: str
     base_sha: str
     head_sha: str
+    diff_path: str | None = None
+    title: str | None = None
     bug_desc: str
     bug_files: list[BugLocation]
     category: Category
+    severity: Severity | None = None
 
 
 class JudgeResult(BaseModel):

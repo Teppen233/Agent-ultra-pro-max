@@ -1,3 +1,2491 @@
-# Populate this list with the licensed Greptile benchmark entries available to
-# your organization. See DatasetEntry in benchmark/judge.py for the schema.
-[]
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1
+  base_sha: a5d290951def84afdcc4c88d2f1f20023fc36e2a
+  head_sha: 8ab88145113dd23a930e23b9cbbcf8b30e4c0b17
+  diff_path: benchmark/diffs/sentry-greptile/pr-1.diff
+  title: Enhanced Pagination Performance for High-Volume Audit Logs
+  bug_desc: Importing non-existent OptimizedCursorPaginator
+  bug_files:
+  - path: src/sentry/api/endpoints/organization_auditlogs.py
+    line_start: 8
+    line_end: 93
+  - path: src/sentry/api/paginator.py
+    line_start: 176
+    line_end: 912
+  - path: src/sentry/utils/cursors.py
+    line_start: 23
+    line_end: 30
+  category: static
+  severity: high
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/2
+  base_sha: 28e3db2520d4ea28c57b08da57b83917ba7b2e15
+  head_sha: 8ab88145113dd23a930e23b9cbbcf8b30e4c0b17
+  diff_path: benchmark/diffs/sentry-greptile/pr-2.diff
+  title: Optimize spans buffer insertion with eviction during insert
+  bug_desc: Negative offset cursor manipulation bypasses pagination boundaries
+  bug_files:
+  - path: src/sentry/api/endpoints/organization_auditlogs.py
+    line_start: 8
+    line_end: 93
+  - path: src/sentry/api/paginator.py
+    line_start: 176
+    line_end: 912
+  - path: src/sentry/scripts/spans/add-buffer.lua
+    line_start: 27
+    line_end: 68
+  - path: src/sentry/spans/buffer.py
+    line_start: 116
+    line_end: 452
+  - path: src/sentry/spans/consumers/process/factory.py
+    line_start: 2
+    line_end: 144
+  - path: src/sentry/utils/cursors.py
+    line_start: 23
+    line_end: 30
+  - path: tests/sentry/spans/consumers/process/test_consumer.py
+    line_start: 41
+    line_end: 76
+  - path: tests/sentry/spans/consumers/process/test_flusher.py
+    line_start: 44
+    line_end: 75
+  - path: tests/sentry/spans/test_buffer.py
+    line_start: 123
+    line_end: 503
+  category: logic
+  severity: critical
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/3
+  base_sha: a5d290951def84afdcc4c88d2f1f20023fc36e2a
+  head_sha: 6ad6fe3899f630ccf922ce7ac681147dc7987435
+  diff_path: benchmark/diffs/sentry-greptile/pr-3.diff
+  title: Support upsampled error count with performance optimizations
+  bug_desc: sample_rate = 0.0 is falsy and skipped
+  bug_files:
+  - path: pyproject.toml
+    line_start: 173
+    line_end: 467
+  - path: sentry-repo
+    line_start: 1
+    line_end: 1
+  - path: src/sentry/api/endpoints/organization_events_stats.py
+    line_start: 11
+    line_end: 302
+  - path: src/sentry/api/helpers/error_upsampling.py
+    line_start: 1
+    line_end: 140
+  - path: src/sentry/search/events/datasets/discover.py
+    line_start: 1038
+    line_end: 1055
+  - path: src/sentry/testutils/factories.py
+    line_start: 8
+    line_end: 1053
+  - path: tests/sentry/api/helpers/test_error_upsampling.py
+    line_start: 1
+    line_end: 101
+  - path: tests/snuba/api/endpoints/test_organization_events_stats.py
+    line_start: 3549
+    line_end: 3722
+  category: logic
+  severity: low
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/4
+  base_sha: ccd14e450fcefa5b286c06221775f50a49059f6d
+  head_sha: 843d7c71926b03f0c5847a0740ac3f7fb3c5fbad
+  diff_path: benchmark/diffs/sentry-greptile/pr-4.diff
+  title: GitHub OAuth Security Enhancement
+  bug_desc: Null reference if github_authenticated_user state is missing
+  bug_files:
+  - path: src/sentry/integrations/github/integration.py
+    line_start: 4
+    line_end: 507
+  - path: src/sentry/web/frontend/pipeline_advancer.py
+    line_start: 16
+    line_end: 44
+  - path: tests/sentry/integrations/github/test_integration.py
+    line_start: 12
+    line_end: 743
+  category: logic
+  severity: critical
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/5
+  base_sha: 49a275847631e231672d01b5dcd66558c069d25b
+  head_sha: ea188e2d736fd6ed27c1dba8aae63b7268e2a7a9
+  diff_path: benchmark/diffs/sentry-greptile/pr-5.diff
+  title: Replays Self-Serve Bulk Delete System
+  bug_desc: Breaking changes in error response format
+  bug_files:
+  - path: devservices/config.yml
+    line_start: 20
+    line_end: 335
+  - path: src/sentry/constants.py
+    line_start: 721
+    line_end: 727
+  - path: src/sentry/feedback/usecases/feedback_summaries.py
+    line_start: 10
+    line_end: 23
+  - path: src/sentry/grouping/parameterization.py
+    line_start: 11
+    line_end: 352
+  - path: src/sentry/hybridcloud/tasks/deliver_webhooks.py
+    line_start: 82
+    line_end: 242
+  - path: src/sentry/integrations/github/integration.py
+    line_start: 384
+    line_end: 412
+  - path: src/sentry/integrations/gitlab/integration.py
+    line_start: 230
+    line_end: 260
+  - path: src/sentry/integrations/source_code_management/commit_context.py
+    line_start: 139
+    line_end: 610
+  - path: src/sentry/issues/endpoints/browser_reporting_collector.py
+    line_start: 1
+    line_end: 130
+  - path: src/sentry/issues/grouptype.py
+    line_start: 511
+    line_end: 517
+  - path: src/sentry/migrations/0917_convert_org_saved_searches_to_views.py
+    line_start: 5
+    line_end: 19
+  - path: src/sentry/migrations/0920_convert_org_saved_searches_to_views_revised.py
+    line_start: 4
+    line_end: 18
+  - path: src/sentry/options/defaults.py
+    line_start: 2624
+    line_end: 2629
+  - path: src/sentry/preprod/__init__.py
+    line_start: 1
+    line_end: 1
+  - path: src/sentry/preprod/analytics.py
+    line_start: 1
+    line_end: 14
+  - path: src/sentry/preprod/api/endpoints/organization_preprod_artifact_assemble.py
+    line_start: 4
+    line_end: 90
+  - path: src/sentry/projectoptions/defaults.py
+    line_start: 202
+    line_end: 208
+  - path: src/sentry/replays/endpoints/project_replay_summarize_breadcrumbs.py
+    line_start: 1
+    line_end: 208
+  - path: src/sentry/replays/usecases/delete.py
+    line_start: 84
+    line_end: 115
+  - path: src/sentry/snuba/ourlogs.py
+    line_start: 154
+    line_end: 171
+  - path: src/sentry/tasks/auth/check_auth.py
+    line_start: 73
+    line_end: 81
+  - path: src/sentry/workflow_engine/endpoints/validators/base/detector.py
+    line_start: 5
+    line_end: 139
+  - path: src/sentry/workflow_engine/processors/delayed_workflow.py
+    line_start: 354
+    line_end: 705
+  - path: src/sentry/workflow_engine/processors/workflow.py
+    line_start: 1
+    line_end: 38
+  - path: static/app/components/codeSnippet.tsx
+    line_start: 4
+    line_end: 282
+  - path: static/app/components/codecov/branchSelector/branchSelector.tsx
+    line_start: 5
+    line_end: 101
+  - path: static/app/components/codecov/datePicker/dateSelector.tsx
+    line_start: 3
+    line_end: 111
+  - path: static/app/components/codecov/integratedOrgSelector/integratedOrgSelector.tsx
+    line_start: 6
+    line_end: 166
+  - path: static/app/components/codecov/repoPicker/repoSelector.tsx
+    line_start: 4
+    line_end: 184
+  - path: static/app/components/core/button/styles.chonk.tsx
+    line_start: 110
+    line_end: 116
+  - path: static/app/components/events/eventAttachments.tsx
+    line_start: 6
+    line_end: 205
+  - path: static/app/components/events/groupingInfo/groupingVariant.tsx
+    line_start: 100
+    line_end: 129
+  - path: static/app/components/events/interfaces/spans/newTraceDetailsHeader.tsx
+    line_start: 1
+    line_end: 161
+  - path: static/app/components/feedback/feedbackSummary.tsx
+    line_start: 1
+    line_end: 64
+  - path: static/app/components/feedback/list/useFeedbackSummary.tsx
+    line_start: 1
+    line_end: 67
+  - path: static/app/components/group/times.tsx
+    line_start: 1
+    line_end: 62
+  - path: static/app/components/replays/breadcrumbs/breadcrumbItem.tsx
+    line_start: 111
+    line_end: 117
+  - path: static/app/components/replays/timeAndScrubberGrid.tsx
+    line_start: 1
+    line_end: 76
+  - path: static/app/components/scrollCarousel.tsx
+    line_start: 201
+    line_end: 207
+  - path: static/app/utils/analytics/replayAnalyticsEvents.tsx
+    line_start: 113
+    line_end: 162
+  - path: static/app/views/alerts/list/rules/alertRuleStatus.tsx
+    line_start: 1
+    line_end: 128
+  - path: static/app/views/alerts/list/rules/row.tsx
+    line_start: 10
+    line_end: 339
+  - path: static/app/views/codecov/tests/onboardingSteps/addUploadToken.tsx
+    line_start: 1
+    line_end: 106
+  - path: static/app/views/dashboards/widgetCard/chart.tsx
+    line_start: 60
+    line_end: 196
+  - path: static/app/views/dashboards/widgets/common/types.tsx
+    line_start: 73
+    line_end: 85
+  - path: static/app/views/dashboards/widgets/tableWidget/defaultTableCellRenderers.tsx
+    line_start: 1
+    line_end: 104
+  - path: static/app/views/dashboards/widgets/tableWidget/fixtures/sampleHTTPRequestTableData.ts
+    line_start: 1
+    line_end: 41
+  - path: static/app/views/dashboards/widgets/tableWidget/tableWidgetVisualization.spec.tsx
+    line_start: 1
+    line_end: 107
+  - path: static/app/views/dashboards/widgets/tableWidget/tableWidgetVisualization.stories.tsx
+    line_start: 1
+    line_end: 141
+  - path: static/app/views/dashboards/widgets/tableWidget/tableWidgetVisualization.tsx
+    line_start: 1
+    line_end: 134
+  - path: static/app/views/explore/charts/index.tsx
+    line_start: 10
+    line_end: 229
+  - path: static/app/views/explore/components/traceItemSearchQueryBuilder.tsx
+    line_start: 8
+    line_end: 75
+  - path: static/app/views/explore/contexts/pageParamsContext/aggregateFields.tsx
+    line_start: 18
+    line_end: 122
+  - path: static/app/views/explore/contexts/pageParamsContext/index.spec.tsx
+    line_start: 115
+    line_end: 587
+  - path: static/app/views/explore/contexts/pageParamsContext/index.tsx
+    line_start: 26
+    line_end: 378
+  - path: static/app/views/explore/contexts/pageParamsContext/sortBys.tsx
+    line_start: 62
+    line_end: 78
+  - path: static/app/views/explore/contexts/pageParamsContext/visualizes.spec.tsx
+    line_start: 5
+    line_end: 104
+  - path: static/app/views/explore/contexts/pageParamsContext/visualizes.tsx
+    line_start: 21
+    line_end: 104
+  - path: static/app/views/explore/hooks/useAddToDashboard.tsx
+    line_start: 13
+    line_end: 73
+  - path: static/app/views/explore/hooks/useAnalytics.tsx
+    line_start: 4
+    line_end: 499
+  - path: static/app/views/explore/hooks/useExploreAggregatesTable.tsx
+    line_start: 75
+    line_end: 84
+  - path: static/app/views/explore/hooks/useExploreTimeseries.tsx
+    line_start: 82
+    line_end: 182
+  - path: static/app/views/explore/hooks/useGetTraceItemAttributeKeys.tsx
+    line_start: 1
+    line_end: 133
+  - path: static/app/views/explore/hooks/useGetTraceItemAttributeValues.spec.tsx
+    line_start: 10
+    line_end: 131
+  - path: static/app/views/explore/hooks/useGetTraceItemAttributeValues.tsx
+    line_start: 9
+    line_end: 86
+  - path: static/app/views/explore/hooks/useTopEvents.tsx
+    line_start: 3
+    line_end: 34
+  - path: static/app/views/explore/hooks/useTraceItemAttributeKeys.tsx
+    line_start: 1
+    line_end: 63
+  - path: static/app/views/explore/spans/spansTab.tsx
+    line_start: 26
+    line_end: 352
+  - path: static/app/views/explore/tables/aggregateColumnEditorModal.spec.tsx
+    line_start: 70
+    line_end: 295
+  - path: static/app/views/explore/tables/aggregateColumnEditorModal.tsx
+    line_start: 64
+    line_end: 314
+  - path: static/app/views/explore/toolbar/index.spec.tsx
+    line_start: 67
+    line_end: 286
+  - path: static/app/views/explore/toolbar/toolbarSaveAs.tsx
+    line_start: 17
+    line_end: 156
+  - path: static/app/views/explore/toolbar/toolbarSortBy.tsx
+    line_start: 37
+    line_end: 43
+  - path: static/app/views/explore/toolbar/toolbarVisualize.tsx
+    line_start: 1
+    line_end: 196
+  - path: static/app/views/explore/types.tsx
+    line_start: 1
+    line_end: 21
+  - path: static/app/views/explore/utils.spec.tsx
+    line_start: 8
+    line_end: 14
+  - path: static/app/views/explore/utils.tsx
+    line_start: 13
+    line_end: 442
+  - path: static/app/views/feedback/feedbackListPage.tsx
+    line_start: 7
+    line_end: 169
+  - path: static/app/views/insights/common/components/chartActionDropdown.tsx
+    line_start: 68
+    line_end: 74
+  - path: static/app/views/insights/pages/transactionNameSearchBar.tsx
+    line_start: 16
+    line_end: 58
+  - path: static/app/views/organizationStats/teamInsights/teamMisery.tsx
+    line_start: 6
+    line_end: 300
+  - path: static/app/views/performance/newTraceDetails/traceDrawer/details/span/eapSections/attributes.tsx
+    line_start: 31
+    line_end: 71
+  - path: static/app/views/performance/newTraceDetails/traceTabsAndVitals.tsx
+    line_start: 1
+    line_end: 116
+  - path: static/app/views/performance/newTraceDetails/traceWaterfall.tsx
+    line_start: 14
+    line_end: 868
+  - path: static/app/views/profiling/profileSummary/index.tsx
+    line_start: 335
+    line_end: 348
+  - path: static/app/views/replays/detail/ai/index.tsx
+    line_start: 11
+    line_end: 100
+  - path: static/app/views/settings/dynamicSampling/organizationSampleRateInput.tsx
+    line_start: 3
+    line_end: 105
+  - path: static/app/views/settings/organizationAuditLog/auditLogList.tsx
+    line_start: 365
+    line_end: 434
+  - path: static/app/views/settings/organizationIntegrations/detailedView/integrationLayout.tsx
+    line_start: 244
+    line_end: 358
+  - path: static/app/views/settings/project/projectOwnership/codeOwnerFileTable.tsx
+    line_start: 4
+    line_end: 180
+  - path: static/gsAdmin/views/instanceLevelOAuth/instanceLevelOAuthDetails.tsx
+    line_start: 4
+    line_end: 183
+  - path: tests/js/fixtures/tabularColumn.ts
+    line_start: 1
+    line_end: 11
+  - path: tests/js/fixtures/tabularColumns.ts
+    line_start: 1
+    line_end: 9
+  - path: tests/sentry/api/endpoints/test_browser_reporting_collector.py
+    line_start: 1
+    line_end: 175
+  - path: tests/sentry/api/endpoints/test_project_details.py
+    line_start: 2065
+    line_end: 2079
+  - path: tests/sentry/api/serializers/test_project.py
+    line_start: 809
+    line_end: 817
+  - path: tests/sentry/grouping/test_parameterization.py
+    line_start: 1
+    line_end: 226
+  - path: tests/sentry/integrations/github/tasks/test_pr_comment.py
+    line_start: 338
+    line_end: 463
+  - path: tests/sentry/integrations/gitlab/tasks/test_pr_comment.py
+    line_start: 299
+    line_end: 436
+  - path: tests/sentry/migrations/test_0917_convert_org_saved_searches_to_views.py
+    line_start: 1
+    line_end: 1
+  - path: tests/sentry/replays/tasks/test_delete_replays_bulk.py
+    line_start: 94
+    line_end: 100
+  - path: tests/sentry/replays/test_project_replay_summarize_breadcrumbs.py
+    line_start: 1
+    line_end: 331
+  - path: tests/sentry/workflow_engine/endpoints/test_organization_detector_details.py
+    line_start: 241
+    line_end: 335
+  - path: tests/sentry/workflow_engine/endpoints/test_organization_detector_index.py
+    line_start: 454
+    line_end: 542
+  - path: tests/sentry/workflow_engine/processors/test_delayed_workflow.py
+    line_start: 38
+    line_end: 708
+  - path: tests/snuba/api/endpoints/test_organization_events_stats.py
+    line_start: 1
+    line_end: 3194
+  category: logic
+  severity: critical
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/6
+  base_sha: c2c41b0db17dafbcf901412623e874b48ae37a6e
+  head_sha: 9bf83b05423beff6dcc542f93e903c562e97469b
+  diff_path: benchmark/diffs/sentry-greptile/pr-6.diff
+  title: Span Buffer Multiprocess Enhancement with Health Monitoring
+  bug_desc: Inconsistent metric tagging with 'shard' and 'shards'
+  bug_files:
+  - path: CLAUDE.md
+    line_start: 445
+    line_end: 461
+  - path: src/sentry/consumers/__init__.py
+    line_start: 427
+    line_end: 441
+  - path: src/sentry/spans/consumers/process/factory.py
+    line_start: 38
+    line_end: 77
+  - path: src/sentry/spans/consumers/process/flusher.py
+    line_start: 15
+    line_end: 347
+  - path: tests/sentry/spans/consumers/process/test_consumer.py
+    line_start: 1
+    line_end: 123
+  - path: tests/sentry/spans/consumers/process/test_flusher.py
+    line_start: 80
+    line_end: 83
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/7
+  base_sha: 19c92a4345beecc750245775de2b3ab9f4f59473
+  head_sha: f9919d789416dd32549d7bb9e238d5df55d5265a
+  diff_path: benchmark/diffs/sentry-greptile/pr-7.diff
+  title: Implement cross-system issue synchronization
+  bug_desc: Shared mutable default in dataclass timestamp
+  bug_files:
+  - path: src/sentry/integrations/mixins/issues.py
+    line_start: 12
+    line_end: 421
+  - path: src/sentry/integrations/services/assignment_source.py
+    line_start: 1
+    line_end: 35
+  - path: src/sentry/integrations/tasks/sync_assignee_outbound.py
+    line_start: 1
+    line_end: 64
+  - path: src/sentry/integrations/utils/sync.py
+    line_start: 5
+    line_end: 145
+  - path: src/sentry/models/groupassignee.py
+    line_start: 12
+    line_end: 243
+  - path: tests/sentry/integrations/services/test_assignment_source.py
+    line_start: 1
+    line_end: 38
+  - path: tests/sentry/models/test_groupassignee.py
+    line_start: 4
+    line_end: 279
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/8
+  base_sha: 5fc9f67c1bd6a50d6c6eb3270b1e6fb7938c5865
+  head_sha: c3b32a7babfcf62b91553388bcd9e9fbfd30a690
+  diff_path: benchmark/diffs/sentry-greptile/pr-8.diff
+  title: Reorganize incident creation / issue occurrence logic
+  bug_desc: Using stale config variable instead of updated one
+  bug_files:
+  - path: src/sentry/monitors/logic/incident_occurrence.py
+    line_start: 1
+    line_end: 171
+  - path: src/sentry/monitors/logic/incidents.py
+    line_start: 1
+    line_end: 104
+  - path: src/sentry/monitors/logic/mark_failed.py
+    line_start: 1
+    line_end: 79
+  - path: src/sentry/monitors/types.py
+    line_start: 102
+    line_end: 117
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/9
+  base_sha: 5c94383dd49b567fb086ad594b40af066f426858
+  head_sha: 33f4fddf64465f75308957c4431e56fd0443eca3
+  diff_path: benchmark/diffs/sentry-greptile/pr-9.diff
+  title: Add ability to use queues to manage parallelism
+  bug_desc: Invalid queue.ShutDown exception handling
+  bug_files:
+  - path: src/sentry/consumers/__init__.py
+    line_start: 118
+    line_end: 144
+  - path: src/sentry/remote_subscriptions/consumers/queue_consumer.py
+    line_start: 1
+    line_end: 345
+  - path: src/sentry/remote_subscriptions/consumers/result_consumer.py
+    line_start: 19
+    line_end: 263
+  - path: tests/sentry/remote_subscriptions/consumers/test_queue_consumer.py
+    line_start: 1
+    line_end: 421
+  - path: tests/sentry/uptime/consumers/test_results_consumer.py
+    line_start: 1
+    line_end: 2146
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/sentry-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/sentry-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/sentry-greptile/pull/10
+  base_sha: 7249010ca8fea2bbc9ae58e7352861c2d17c2ef2
+  head_sha: de60b7fb01a1df4ecca82cc842a8b5fb16d92794
+  diff_path: benchmark/diffs/sentry-greptile/pr-10.diff
+  title: Add hook for producing occurrences from the stateful detector
+  bug_desc: Incomplete implementation (only contains pass)
+  bug_files:
+  - path: src/sentry/incidents/grouptype.py
+    line_start: 4
+    line_end: 15
+  - path: src/sentry/workflow_engine/models/detector.py
+    line_start: 1
+    line_end: 67
+  - path: src/sentry/workflow_engine/processors/detector.py
+    line_start: 14
+    line_end: 304
+  - path: tests/sentry/workflow_engine/processors/test_detector.py
+    line_start: 1
+    line_end: 547
+  category: static
+  severity: high
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/2
+  base_sha: bff28e5d6fef42b4e7c036c688f0bad4410b42a2
+  head_sha: e043a5efd872362a3fc146ed0d9ce4393e316c1e
+  diff_path: benchmark/diffs/cal.com-greptile/pr-2.diff
+  title: Async import of the appStore packages
+  bug_desc: Async callbacks in forEach creates unhandled promise rejections
+  bug_files:
+  - path: packages/app-store/_utils/getCalendar.ts
+    line_start: 6
+    line_end: 18
+  - path: packages/app-store/index.ts
+    line_start: 1
+    line_end: 33
+  - path: packages/app-store/vital/lib/reschedule.ts
+    line_start: 122
+    line_end: 131
+  - path: packages/app-store/wipemycalother/lib/reschedule.ts
+    line_start: 122
+    line_end: 131
+  - path: packages/core/CalendarManager.ts
+    line_start: 28
+    line_end: 338
+  - path: packages/core/EventManager.ts
+    line_start: 485
+    line_end: 491
+  - path: packages/core/videoClient.ts
+    line_start: 18
+    line_end: 209
+  - path: packages/features/bookings/lib/handleCancelBooking.ts
+    line_start: 240
+    line_end: 592
+  - path: packages/features/bookings/lib/handleNewBooking.ts
+    line_start: 885
+    line_end: 891
+  - path: packages/lib/payment/deletePayment.ts
+    line_start: 13
+    line_end: 19
+  - path: packages/lib/payment/handlePayment.ts
+    line_start: 23
+    line_end: 29
+  - path: packages/trpc/server/routers/viewer/bookings.tsx
+    line_start: 550
+    line_end: 970
+  category: logic
+  severity: low
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/3
+  base_sha: efa6d464a38e60ceeeb88f40668c1c4ac4bfaf54
+  head_sha: a308075bc39b77ed7059b0cae9d443d669a7bf98
+  diff_path: benchmark/diffs/cal.com-greptile/pr-3.diff
+  title: 'feat: 2fa backup codes'
+  bug_desc: Backup codes not invalidated after use
+  bug_files:
+  - path: apps/web/components/auth/BackupCode.tsx
+    line_start: 1
+    line_end: 29
+  - path: apps/web/components/auth/TwoFactor.tsx
+    line_start: 5
+    line_end: 46
+  - path: apps/web/components/settings/DisableTwoFactorModal.tsx
+    line_start: 5
+    line_end: 124
+  - path: apps/web/components/settings/EnableTwoFactorModal.tsx
+    line_start: 5
+    line_end: 292
+  - path: apps/web/components/settings/TwoFactorAuthAPI.ts
+    line_start: 19
+    line_end: 28
+  - path: apps/web/pages/api/auth/two-factor/totp/disable.ts
+    line_start: 43
+    line_end: 110
+  - path: apps/web/pages/api/auth/two-factor/totp/setup.ts
+    line_start: 1
+    line_end: 79
+  - path: apps/web/pages/auth/login.tsx
+    line_start: 21
+    line_end: 224
+  - path: apps/web/playwright/login.2fa.e2e.ts
+    line_start: 9
+    line_end: 129
+  - path: apps/web/public/static/locales/en/common.json
+    line_start: 2010
+    line_end: 2022
+  - path: packages/features/auth/lib/ErrorCode.ts
+    line_start: 8
+    line_end: 15
+  - path: packages/features/auth/lib/next-auth-options.ts
+    line_start: 11
+    line_end: 160
+  - path: packages/lib/test/builder.ts
+    line_start: 189
+    line_end: 195
+  - path: packages/prisma/migrations/20230804153419_add_backup_codes/migration.sql
+    line_start: 1
+    line_end: 2
+  - path: packages/prisma/schema.prisma
+    line_start: 202
+    line_end: 208
+  - path: packages/ui/components/form/inputs/Input.tsx
+    line_start: 44
+    line_end: 54
+  category: security
+  severity: critical
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/4
+  base_sha: 500bfb4d82c53c42e7f53250c6715f5fb474dc2b
+  head_sha: bd797c1ea00a61425735f2b9fd7ce212ebf8c8ab
+  diff_path: benchmark/diffs/cal.com-greptile/pr-4.diff
+  title: 'fix: handle collective multiple host on destinationCalendar'
+  bug_desc: Null reference error if array is empty
+  bug_files:
+  - path: apps/web/pages/api/cron/bookingReminder.ts
+    line_start: 104
+    line_end: 133
+  - path: apps/web/playwright/webhook.e2e.ts
+    line_start: 246
+    line_end: 252
+  - path: packages/app-store/googlecalendar/lib/CalendarService.ts
+    line_start: 84
+    line_end: 320
+  - path: packages/app-store/larkcalendar/lib/CalendarService.ts
+    line_start: 125
+    line_end: 241
+  - path: packages/app-store/office365calendar/lib/CalendarService.ts
+    line_start: 70
+    line_end: 79
+  - path: packages/core/CalendarManager.ts
+    line_start: 217
+    line_end: 271
+  - path: packages/core/EventManager.ts
+    line_start: 114
+    line_end: 611
+  - path: packages/core/builders/CalendarEvent/builder.ts
+    line_start: 1
+    line_end: 5
+  - path: packages/core/builders/CalendarEvent/class.ts
+    line_start: 23
+    line_end: 29
+  - path: packages/emails/src/templates/BrokenIntegrationEmail.tsx
+    line_start: 85
+    line_end: 93
+  - path: packages/features/bookings/lib/handleCancelBooking.ts
+    line_start: 248
+    line_end: 535
+  - path: packages/features/bookings/lib/handleNewBooking.ts
+    line_start: 1
+    line_end: 1882
+  - path: packages/features/ee/payments/api/paypal-webhook.ts
+    line_start: 149
+    line_end: 159
+  - path: packages/features/ee/payments/api/webhook.ts
+    line_start: 98
+    line_end: 232
+  - path: packages/lib/CalendarService.ts
+    line_start: 153
+    line_end: 518
+  - path: packages/trpc/server/routers/loggedInViewer/deleteCredential.handler.ts
+    line_start: 287
+    line_end: 297
+  - path: packages/trpc/server/routers/viewer/bookings/confirm.handler.ts
+    line_start: 172
+    line_end: 182
+  - path: packages/trpc/server/routers/viewer/bookings/editLocation.handler.ts
+    line_start: 82
+    line_end: 92
+  - path: packages/trpc/server/routers/viewer/bookings/requestReschedule.handler.ts
+    line_start: 237
+    line_end: 245
+  - path: packages/trpc/server/routers/viewer/organizations/create.handler.ts
+    line_start: 148
+    line_end: 156
+  - path: packages/types/Calendar.d.ts
+    line_start: 8
+    line_end: 224
+  - path: packages/types/EventManager.d.ts
+    line_start: 23
+    line_end: 29
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/5
+  base_sha: 202d248ae45f8f2f01324b0d8eb5914e9154112f
+  head_sha: 56ff75f07b92ba8ef499ff28a2f98c25f339fdae
+  diff_path: benchmark/diffs/cal.com-greptile/pr-5.diff
+  title: 'feat: convert InsightsBookingService to use Prisma.sql raw queries'
+  bug_desc: Potential SQL injection risk in raw SQL query construction
+  bug_files:
+  - path: packages/lib/server/service/__tests__/insightsBooking.integration-test.ts
+    line_start: 1
+    line_end: 494
+  - path: packages/lib/server/service/insightsBooking.ts
+    line_start: 1
+    line_end: 220
+  category: security
+  severity: critical
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/6
+  base_sha: 235ec0e906a189ceb0843cfa7af585b1d46f699f
+  head_sha: 2ebfcf448c7e4136ac1b8b9ef9b526a4424fd155
+  diff_path: benchmark/diffs/cal.com-greptile/pr-6.diff
+  title: Comprehensive workflow reminder management for booking lifecycle events
+  bug_desc: Missing database cleanup when immediateDelete is true
+  bug_files:
+  - path: packages/features/bookings/lib/handleCancelBooking.ts
+    line_start: 1
+    line_end: 498
+  - path: packages/features/bookings/lib/handleNewBooking.ts
+    line_start: 1
+    line_end: 979
+  - path: packages/features/ee/workflows/api/scheduleEmailReminders.ts
+    line_start: 7
+    line_end: 81
+  - path: packages/features/ee/workflows/components/WorkflowStepContainer.tsx
+    line_start: 387
+    line_end: 461
+  - path: packages/features/ee/workflows/lib/reminders/emailReminderManager.ts
+    line_start: 194
+    line_end: 234
+  - path: packages/features/ee/workflows/lib/reminders/smsReminderManager.ts
+    line_start: 174
+    line_end: 189
+  - path: packages/prisma/migrations/20230217230604_add_cancelled_to_workflow_reminder/migration.sql
+    line_start: 1
+    line_end: 2
+  - path: packages/prisma/schema.prisma
+    line_start: 641
+    line_end: 647
+  - path: packages/trpc/server/routers/viewer/bookings.tsx
+    line_start: 5
+    line_end: 498
+  - path: packages/trpc/server/routers/viewer/workflows.tsx
+    line_start: 1
+    line_end: 963
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/7
+  base_sha: c4fe69d8265ba632c10f3a90ea05e4a74ff14c85
+  head_sha: 3ef328421f60cd096b7676ef7ee7c32b71593049
+  diff_path: benchmark/diffs/cal.com-greptile/pr-7.diff
+  title: Advanced date override handling and timezone compatibility improvements
+  bug_desc: Incorrect end time calculation using slotStartTime instead of slotEndTime
+  bug_files:
+  - path: apps/web/test/lib/getSchedule.test.ts
+    line_start: 784
+    line_end: 807
+  - path: packages/lib/slots.ts
+    line_start: 208
+    line_end: 229
+  - path: packages/trpc/server/routers/viewer/slots.ts
+    line_start: 19
+    line_end: 594
+  - path: packages/types/schedule.d.ts
+    line_start: 2
+    line_end: 8
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/8
+  base_sha: bc89fe00ea84d20bedcec782f0701b9711dc8201
+  head_sha: 824145b0e245661875240ed5c8745decd2293d1a
+  diff_path: benchmark/diffs/cal.com-greptile/pr-8.diff
+  title: OAuth credential sync and app integration enhancements
+  bug_desc: Timing attack vulnerability using direct string comparison
+  bug_files:
+  - path: .env.example
+    line_start: 230
+    line_end: 259
+  - path: apps/web/pages/api/webhook/app-credential.ts
+    line_start: 1
+    line_end: 93
+  - path: packages/app-store/_utils/oauth/createOAuthAppCredential.ts
+    line_start: 3
+    line_end: 10
+  - path: packages/app-store/_utils/oauth/decodeOAuthState.ts
+    line_start: 1
+    line_end: 6
+  - path: packages/app-store/_utils/oauth/encodeOAuthState.ts
+    line_start: 1
+    line_end: 6
+  - path: packages/app-store/_utils/oauth/parseRefreshTokenResponse.ts
+    line_start: 1
+    line_end: 32
+  - path: packages/app-store/_utils/oauth/refreshOAuthTokens.ts
+    line_start: 1
+    line_end: 22
+  - path: packages/app-store/googlecalendar/api/add.ts
+    line_start: 3
+    line_end: 10
+  - path: packages/app-store/googlecalendar/api/callback.ts
+    line_start: 5
+    line_end: 13
+  - path: packages/app-store/googlecalendar/lib/CalendarService.ts
+    line_start: 18
+    line_end: 100
+  - path: packages/app-store/hubspot/api/add.ts
+    line_start: 3
+    line_end: 10
+  - path: packages/app-store/hubspot/api/callback.ts
+    line_start: 5
+    line_end: 14
+  - path: packages/app-store/hubspot/lib/CalendarService.ts
+    line_start: 23
+    line_end: 191
+  - path: packages/app-store/larkcalendar/api/add.ts
+    line_start: 5
+    line_end: 12
+  - path: packages/app-store/larkcalendar/api/callback.ts
+    line_start: 6
+    line_end: 13
+  - path: packages/app-store/larkcalendar/lib/CalendarService.ts
+    line_start: 11
+    line_end: 85
+  - path: packages/app-store/office365calendar/api/add.ts
+    line_start: 3
+    line_end: 10
+  - path: packages/app-store/office365calendar/api/callback.ts
+    line_start: 4
+    line_end: 12
+  - path: packages/app-store/office365calendar/lib/CalendarService.ts
+    line_start: 17
+    line_end: 267
+  - path: packages/app-store/office365video/api/add.ts
+    line_start: 3
+    line_end: 10
+  - path: packages/app-store/office365video/api/callback.ts
+    line_start: 4
+    line_end: 13
+  - path: packages/app-store/office365video/lib/VideoApiAdapter.ts
+    line_start: 9
+    line_end: 78
+  - path: packages/app-store/salesforce/api/add.ts
+    line_start: 3
+    line_end: 10
+  - path: packages/app-store/salesforce/api/callback.ts
+    line_start: 4
+    line_end: 13
+  - path: packages/app-store/salesforce/lib/CalendarService.ts
+    line_start: 1
+    line_end: 103
+  - path: packages/app-store/stripepayment/api/callback.ts
+    line_start: 2
+    line_end: 9
+  - path: packages/app-store/tandemvideo/api/callback.ts
+    line_start: 2
+    line_end: 10
+  - path: packages/app-store/webex/api/callback.ts
+    line_start: 3
+    line_end: 10
+  - path: packages/app-store/webex/lib/VideoApiAdapter.ts
+    line_start: 8
+    line_end: 81
+  - path: packages/app-store/zoho-bigin/api/add.ts
+    line_start: 3
+    line_end: 20
+  - path: packages/app-store/zoho-bigin/api/callback.ts
+    line_start: 5
+    line_end: 14
+  - path: packages/app-store/zoho-bigin/lib/CalendarService.ts
+    line_start: 15
+    line_end: 97
+  - path: packages/app-store/zohocrm/api/_getAdd.ts
+    line_start: 3
+    line_end: 10
+  - path: packages/app-store/zohocrm/api/callback.ts
+    line_start: 5
+    line_end: 14
+  - path: packages/app-store/zohocrm/lib/CalendarService.ts
+    line_start: 16
+    line_end: 219
+  - path: packages/app-store/zoomvideo/api/add.ts
+    line_start: 5
+    line_end: 11
+  - path: packages/app-store/zoomvideo/api/callback.ts
+    line_start: 3
+    line_end: 10
+  - path: packages/app-store/zoomvideo/lib/VideoApiAdapter.ts
+    line_start: 9
+    line_end: 107
+  - path: packages/lib/constants.ts
+    line_start: 99
+    line_end: 104
+  - path: turbo.json
+    line_start: 197
+    line_end: 210
+  category: security
+  severity: critical
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/9
+  base_sha: 917c7b0764f4c6bfdca95db2c5f73dbfdbe11757
+  head_sha: 2dae0bfb8c72b51aa49260dc1f7f215a6290f3a6
+  diff_path: benchmark/diffs/cal.com-greptile/pr-9.diff
+  title: SMS workflow reminder retry count tracking
+  bug_desc: OR condition causes deletion of all workflow reminders
+  bug_files:
+  - path: packages/features/ee/workflows/api/scheduleSMSReminders.ts
+    line_start: 28
+    line_end: 200
+  - path: packages/prisma/migrations/20240508134359_add_retry_count_to_workflow_reminder/migration.sql
+    line_start: 1
+    line_end: 2
+  - path: packages/prisma/schema.prisma
+    line_start: 997
+    line_end: 1003
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/10
+  base_sha: b004587262e8221083bafbe9a0c515e7becaa7b3
+  head_sha: baa9045af7711ea0b86390cb0bf0fdce5430228c
+  diff_path: benchmark/diffs/cal.com-greptile/pr-10.diff
+  title: Add guest management functionality to existing bookings
+  bug_desc: Case sensitivity bypass in email blacklist
+  bug_files:
+  - path: apps/web/components/booking/BookingListItem.tsx
+    line_start: 43
+    line_end: 364
+  - path: apps/web/components/dialog/AddGuestsDialog.tsx
+    line_start: 1
+    line_end: 107
+  - path: apps/web/public/static/locales/en/common.json
+    line_start: 1119
+    line_end: 2437
+  - path: packages/emails/email-manager.ts
+    line_start: 18
+    line_end: 553
+  - path: packages/emails/src/templates/AttendeeAddGuestsEmail.tsx
+    line_start: 1
+    line_end: 10
+  - path: packages/emails/src/templates/OrganizerAddGuestsEmail.tsx
+    line_start: 1
+    line_end: 11
+  - path: packages/emails/src/templates/index.ts
+    line_start: 35
+    line_end: 40
+  - path: packages/emails/templates/attendee-add-guests-email.ts
+    line_start: 1
+    line_end: 34
+  - path: packages/emails/templates/organizer-add-guests-email.ts
+    line_start: 1
+    line_end: 38
+  - path: packages/trpc/server/routers/viewer/bookings/_router.tsx
+    line_start: 1
+    line_end: 98
+  - path: packages/trpc/server/routers/viewer/bookings/addGuests.handler.ts
+    line_start: 1
+    line_end: 174
+  - path: packages/trpc/server/routers/viewer/bookings/addGuests.schema.ts
+    line_start: 1
+    line_end: 8
+  - path: packages/ui/form/MultiEmail.tsx
+    line_start: 1
+    line_end: 96
+  - path: packages/ui/form/MultiEmailLazy.tsx
+    line_start: 1
+    line_end: 6
+  - path: packages/ui/index.tsx
+    line_start: 150
+    line_end: 156
+  category: security
+  severity: high
+- repo: ai-code-review-evaluation/cal.com-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/cal.com-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/cal.com-greptile/pull/11
+  base_sha: 3784421f025afc3a595fbb4e222916785cc6de0c
+  head_sha: cb7869234729f908648af6796ab4082b569daf39
+  diff_path: benchmark/diffs/cal.com-greptile/pr-11.diff
+  title: 'feat: add calendar cache status and actions (#22532)'
+  bug_desc: Inaccurate cache status tracking due to unreliable updatedAt field
+  bug_files:
+  - path: apps/web/package.json
+    line_start: 8
+    line_end: 14
+  - path: apps/web/public/static/locales/en/common.json
+    line_start: 3379
+    line_end: 3390
+  - path: packages/app-store/googlecalendar/lib/CalendarService.ts
+    line_start: 1019
+    line_end: 1027
+  - path: packages/features/apps/components/CredentialActionsDropdown.tsx
+    line_start: 1
+    line_end: 157
+  - path: packages/features/calendar-cache/calendar-cache.repository.interface.ts
+    line_start: 27
+    line_end: 33
+  - path: packages/features/calendar-cache/calendar-cache.repository.mock.ts
+    line_start: 23
+    line_end: 31
+  - path: packages/features/calendar-cache/calendar-cache.repository.ts
+    line_start: 169
+    line_end: 189
+  - path: packages/lib/getConnectedDestinationCalendars.ts
+    line_start: 18
+    line_end: 31
+  - path: packages/lib/server/repository/selectedCalendar.ts
+    line_start: 257
+    line_end: 409
+  - path: packages/lib/server/repository/user.ts
+    line_start: 896
+    line_end: 903
+  - path: packages/platform/atoms/selected-calendars/wrappers/SelectedCalendarsSettingsWebWrapper.tsx
+    line_start: 2
+    line_end: 165
+  - path: packages/prisma/migrations/20250715160635_add_calendar_cache_updated_at/migration.sql
+    line_start: 1
+    line_end: 9
+  - path: packages/prisma/schema.prisma
+    line_start: 1715
+    line_end: 1722
+  - path: packages/trpc/server/routers/viewer/calendars/_router.tsx
+    line_start: 1
+    line_end: 34
+  - path: packages/trpc/server/routers/viewer/calendars/connectedCalendars.handler.ts
+    line_start: 1
+    line_end: 42
+  - path: packages/trpc/server/routers/viewer/calendars/deleteCache.handler.ts
+    line_start: 1
+    line_end: 33
+  - path: scripts/test-gcal-webhooks.sh
+    line_start: 1
+    line_end: 79
+  category: logic
+  severity: low
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/1
+  base_sha: ed865831071a0c0a63c75ad0cfa6661107dabcaf
+  head_sha: 3647ba7360b8d157e4a294a650a365b6aca070d8
+  diff_path: benchmark/diffs/grafana-greptile/pr-1.diff
+  title: 'Anonymous: Add configurable device limit'
+  bug_desc: Race condition in CreateOrUpdateDevice method
+  bug_files:
+  - path: packages/grafana-data/src/types/config.ts
+    line_start: 197
+    line_end: 203
+  - path: packages/grafana-runtime/src/config.ts
+    line_start: 94
+    line_end: 100
+  - path: pkg/api/dtos/frontend_settings.go
+    line_start: 192
+    line_end: 198
+  - path: pkg/api/frontendsettings.go
+    line_start: 195
+    line_end: 201
+  - path: pkg/services/anonymous/anonimpl/anonstore/database.go
+    line_start: 13
+    line_end: 122
+  - path: pkg/services/anonymous/anonimpl/anonstore/database_test.go
+    line_start: 13
+    line_end: 77
+  - path: pkg/services/anonymous/anonimpl/api/api.go
+    line_start: 15
+    line_end: 74
+  - path: pkg/services/anonymous/anonimpl/client.go
+    line_start: 2
+    line_end: 53
+  - path: pkg/services/anonymous/anonimpl/impl.go
+    line_start: 6
+    line_end: 150
+  - path: pkg/services/anonymous/anonimpl/impl_test.go
+    line_start: 113
+    line_end: 155
+  - path: pkg/setting/setting.go
+    line_start: 372
+    line_end: 1658
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/2
+  base_sha: e650fa7b2041c91fbb98ef3432b3969e13bbdac9
+  head_sha: d9dc93c4a6c88ef850dbe526cb3226ae99cafa20
+  diff_path: benchmark/diffs/grafana-greptile/pr-2.diff
+  title: 'AuthZService: improve authz caching'
+  bug_desc: Cache entries without expiration causing permanent permission denials
+  bug_files:
+  - path: pkg/services/authz/rbac.go
+    line_start: 98
+    line_end: 251
+  - path: pkg/services/authz/rbac/cache.go
+    line_start: 27
+    line_end: 36
+  - path: pkg/services/authz/rbac/service.go
+    line_start: 53
+    line_end: 426
+  - path: pkg/services/authz/rbac/service_test.go
+    line_start: 339
+    line_end: 1339
+  category: security
+  severity: high
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/3
+  base_sha: 5dac6731cbb99f3374898cf6a1558edb222d323b
+  head_sha: 00393c2ac9103072bc2194118e455f9248a37816
+  diff_path: benchmark/diffs/grafana-greptile/pr-3.diff
+  title: 'Plugins: Chore: Renamed instrumentation middleware to metrics middleware'
+  bug_desc: Undefined endpoint constants causing compilation errors
+  bug_files:
+  - path: pkg/plugins/log/fake.go
+    line_start: 1
+    line_end: 52
+  - path: pkg/plugins/log/ifaces.go
+    line_start: 1
+    line_end: 40
+  - path: pkg/plugins/log/logger.go
+    line_start: 1
+    line_end: 56
+  - path: pkg/services/pluginsintegration/clientmiddleware/contextual_logger_middleware.go
+    line_start: 1
+    line_end: 69
+  - path: pkg/services/pluginsintegration/clientmiddleware/logger_middleware.go
+    line_start: 6
+    line_end: 112
+  - path: pkg/services/pluginsintegration/clientmiddleware/metrics_middleware.go
+    line_start: 8
+    line_end: 197
+  - path: pkg/services/pluginsintegration/clientmiddleware/metrics_middleware_test.go
+    line_start: 75
+    line_end: 81
+  - path: pkg/services/pluginsintegration/pluginsintegration.go
+    line_start: 156
+    line_end: 163
+  category: static
+  severity: critical
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/4
+  base_sha: dcb853d3099c08b74370fcc965342f035dd6d6cc
+  head_sha: 3ba2457a7090b2b76f4b368c8a9db835d0bec66c
+  diff_path: benchmark/diffs/grafana-greptile/pr-4.diff
+  title: Advanced Query Processing Architecture
+  bug_desc: Double interpolation risk
+  bug_files:
+  - path: public/app/plugins/datasource/loki/querySplitting.test.ts
+    line_start: 72
+    line_end: 92
+  - path: public/app/plugins/datasource/loki/querySplitting.ts
+    line_start: 293
+    line_end: 302
+  - path: public/app/plugins/datasource/loki/shardQuerySplitting.test.ts
+    line_start: 53
+    line_end: 178
+  - path: public/app/plugins/datasource/loki/shardQuerySplitting.ts
+    line_start: 46
+    line_end: 55
+  category: logic
+  severity: critical
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/5
+  base_sha: acdb0e151c9a2abd6e691353de6cc515d316ee76
+  head_sha: 3e6d620d2c1d1f6c10611fba8b0ee062d6fb2a68
+  diff_path: benchmark/diffs/grafana-greptile/pr-5.diff
+  title: Notification Rule Processing Engine
+  bug_desc: Missing key prop causing React rendering issues
+  bug_files:
+  - path: public/app/features/alerting/unified/components/rule-viewer/AlertRuleMenu.tsx
+    line_start: 10
+    line_end: 103
+  - path: public/app/features/alerting/unified/components/rules/RuleDetails.test.tsx
+    line_start: 7
+    line_end: 90
+  - path: public/app/features/alerting/unified/components/rules/RulesTable.test.tsx
+    line_start: 4
+    line_end: 279
+  - path: public/app/features/alerting/unified/hooks/useAbilities.ts
+    line_start: 14
+    line_end: 410
+  - path: public/app/features/alerting/unified/rule-list/FilterView.tsx
+    line_start: 12
+    line_end: 164
+  - path: public/app/features/alerting/unified/rule-list/GrafanaGroupLoader.test.tsx
+    line_start: 2
+    line_end: 210
+  - path: public/app/features/alerting/unified/rule-list/GrafanaGroupLoader.tsx
+    line_start: 1
+    line_end: 82
+  - path: public/app/features/alerting/unified/rule-list/GrafanaRuleListItem.tsx
+    line_start: 1
+    line_end: 71
+  - path: public/app/features/alerting/unified/rule-list/GrafanaRuleLoader.tsx
+    line_start: 1
+    line_end: 1
+  - path: public/app/features/alerting/unified/rule-list/components/RuleActionsButtons.V2.tsx
+    line_start: 1
+    line_end: 151
+  - path: public/app/features/alerting/unified/rule-list/hooks/prometheusGroupsGenerator.ts
+    line_start: 4
+    line_end: 87
+  - path: public/app/features/alerting/unified/utils/rules.ts
+    line_start: 168
+    line_end: 177
+  - path: public/app/types/unified-alerting-dto.ts
+    line_start: 132
+    line_end: 138
+  - path: public/locales/en-US/grafana.json
+    line_start: 2415
+    line_end: 2420
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/6
+  base_sha: 5e3a5b355ef7478d7be86923749e25aebef5226a
+  head_sha: 67b74e1e8a7d26d24617b7313b90fa4649138318
+  diff_path: benchmark/diffs/grafana-greptile/pr-6.diff
+  title: Dual Storage Architecture
+  bug_desc: Incorrect metrics recording methods causing misleading performance tracking
+  bug_files:
+  - path: go.work.sum
+    line_start: 402
+    line_end: 846
+  - path: pkg/apiserver/rest/dualwriter_mode1_test.go
+    line_start: 135
+    line_end: 140
+  - path: pkg/apiserver/rest/dualwriter_mode3.go
+    line_start: 2
+    line_end: 172
+  - path: pkg/apiserver/rest/dualwriter_mode3_test.go
+    line_start: 1
+    line_end: 356
+  - path: pkg/tests/apis/playlist/playlist_test.go
+    line_start: 129
+    line_end: 315
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/7
+  base_sha: f84c8f685310cc41b52831c130e700a01b225b58
+  head_sha: 81c45bfe449584dc7ff50e4fabd5d0c6568999b5
+  diff_path: benchmark/diffs/grafana-greptile/pr-7.diff
+  title: Database Performance Optimizations
+  bug_desc: Incorrect error level logging
+  bug_files:
+  - path: pkg/services/annotations/annotationsimpl/cleanup_test.go
+    line_start: 2
+    line_end: 294
+  - path: pkg/services/annotations/annotationsimpl/xorm_store.go
+    line_start: 10
+    line_end: 654
+  - path: pkg/services/cleanup/cleanup.go
+    line_start: 74
+    line_end: 80
+  category: logic
+  severity: low
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/8
+  base_sha: 0a870e6a8855cee9c8ae391767da40dbb1c16cc6
+  head_sha: 95000f9fc8049d47f837b6e8603c230c2a073ae5
+  diff_path: benchmark/diffs/grafana-greptile/pr-8.diff
+  title: Frontend Asset Optimization
+  bug_desc: Deadlock potential during concurrent annotation deletion operations
+  bug_files:
+  - path: pkg/api/webassets/webassets.go
+    line_start: 8
+    line_end: 52
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/9
+  base_sha: cbe1e7d63f098e306058c0fbcab2f5c30602fa7d
+  head_sha: ea71201ddc66f06a3f16387e85a09c53514aaadd
+  diff_path: benchmark/diffs/grafana-greptile/pr-9.diff
+  title: Advanced SQL Analytics Framework
+  bug_desc: enableSqlExpressions function always returns false, disabling SQL functionality
+  bug_files:
+  - path: go.mod
+    line_start: 142
+    line_end: 486
+  - path: go.work.sum
+    line_start: 283
+    line_end: 759
+  - path: pkg/expr/reader.go
+    line_start: 126
+    line_end: 200
+  - path: pkg/expr/sql/db.go
+    line_start: 1
+    line_end: 26
+  - path: pkg/expr/sql/parser.go
+    line_start: 8
+    line_end: 26
+  - path: pkg/expr/sql_command.go
+    line_start: 7
+    line_end: 103
+  category: logic
+  severity: critical
+- repo: ai-code-review-evaluation/grafana-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/grafana-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/grafana-greptile/pull/10
+  base_sha: 871af07203177ce59a24e742107119409274f48a
+  head_sha: d762a9643618a6ba7c43da27374bd9ffc80889ce
+  diff_path: benchmark/diffs/grafana-greptile/pr-10.diff
+  title: Unified Storage Performance Optimizations
+  bug_desc: Race condition in cache locking
+  bug_files:
+  - path: pkg/server/module_server_test.go
+    line_start: 32
+    line_end: 41
+  - path: pkg/storage/unified/resource/search.go
+    line_start: 8
+    line_end: 313
+  - path: pkg/storage/unified/resource/server.go
+    line_start: 255
+    line_end: 990
+  - path: pkg/storage/unified/search/bleve.go
+    line_start: 85
+    line_end: 142
+  - path: pkg/storage/unified/sql/backend.go
+    line_start: 123
+    line_end: 129
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1
+  base_sha: 30f804af450dec523909a52f2a4b97302d27f5cc
+  head_sha: 3214b188de808fdb0fff335556b686f1b0a63218
+  diff_path: benchmark/diffs/keycloak-greptile/pr-1.diff
+  title: Fixing Re-authentication with passkeys
+  bug_desc: ConditionalPasskeysEnabled() called without UserModel parameter
+  bug_files:
+  - path: services/src/main/java/org/keycloak/authentication/authenticators/browser/AbstractUsernameFormAuthenticator.java
+    line_start: 55
+    line_end: 225
+  - path: services/src/main/java/org/keycloak/authentication/authenticators/browser/UsernameForm.java
+    line_start: 44
+    line_end: 50
+  - path: services/src/main/java/org/keycloak/authentication/authenticators/browser/UsernamePasswordForm.java
+    line_start: 110
+    line_end: 164
+  - path: services/src/main/java/org/keycloak/authentication/authenticators/browser/WebAuthnAuthenticator.java
+    line_start: 97
+    line_end: 134
+  - path: services/src/main/java/org/keycloak/authentication/authenticators/browser/WebAuthnConditionalUIAuthenticator.java
+    line_start: 20
+    line_end: 68
+  - path: services/src/main/java/org/keycloak/authentication/authenticators/util/AuthenticatorUtils.java
+    line_start: 23
+    line_end: 135
+  - path: testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/webauthn/passwordless/PasskeysOrganizationAuthenticationTest.java
+    line_start: 32
+    line_end: 322
+  - path: testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/webauthn/passwordless/PasskeysUsernameFormTest.java
+    line_start: 34
+    line_end: 322
+  - path: testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/webauthn/passwordless/PasskeysUsernamePasswordFormTest.java
+    line_start: 23
+    line_end: 433
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/2
+  base_sha: 5ff9e9147dc08432b3ec7753906467c390b1e6ee
+  head_sha: 3e597722a9164d145bc46aa1de5bd714fb6ba357
+  diff_path: benchmark/diffs/keycloak-greptile/pr-2.diff
+  title: Add caching support for IdentityProviderStorageProvider .getForLogin operations
+  bug_desc: Recursive caching call using session instead of delegate
+  bug_files:
+  - path: model/infinispan/src/main/java/org/keycloak/models/cache/infinispan/idp/InfinispanIdentityProviderStorageProvider.java
+    line_start: 18
+    line_end: 422
+  - path: server-spi/src/main/java/org/keycloak/models/IdentityProviderStorageProvider.java
+    line_start: 251
+    line_end: 257
+  - path: services/src/main/java/org/keycloak/organization/forms/login/freemarker/model/OrganizationAwareIdentityProviderBean.java
+    line_start: 72
+    line_end: 83
+  - path: testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/organization/cache/OrganizationCacheTest.java
+    line_start: 20
+    line_end: 536
+  category: logic
+  severity: critical
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/3
+  base_sha: 10aca5552314d6e5c9226f3c6d0107861c38c693
+  head_sha: b95d12a968e8374a93ddcd56f47ab12eb4136ff4
+  diff_path: benchmark/diffs/keycloak-greptile/pr-3.diff
+  title: Add AuthzClientCryptoProvider for authorization client cryptographic operations
+  bug_desc: Returns wrong provider (default keystore instead of BouncyCastle)
+  bug_files:
+  - path: authz/client/pom.xml
+    line_start: 58
+    line_end: 74
+  - path: authz/client/src/main/java/org/keycloak/authorization/client/AuthzClient.java
+    line_start: 30
+    line_end: 98
+  - path: authz/client/src/main/java/org/keycloak/authorization/client/util/crypto/ASN1Decoder.java
+    line_start: 1
+    line_end: 203
+  - path: authz/client/src/main/java/org/keycloak/authorization/client/util/crypto/ASN1Encoder.java
+    line_start: 1
+    line_end: 101
+  - path: authz/client/src/main/java/org/keycloak/authorization/client/util/crypto/AuthzClientCryptoProvider.java
+    line_start: 1
+    line_end: 226
+  - path: authz/client/src/main/resources/META-INF/services/org.keycloak.common.crypto.CryptoProvider
+    line_start: 1
+    line_end: 20
+  - path: authz/client/src/test/java/org/keycloak/authorization/client/test/ECDSAAlgorithmTest.java
+    line_start: 1
+    line_end: 74
+  - path: common/src/main/java/org/keycloak/common/crypto/CryptoIntegration.java
+    line_start: 3
+    line_end: 73
+  - path: common/src/main/java/org/keycloak/common/crypto/CryptoProvider.java
+    line_start: 36
+    line_end: 97
+  - path: crypto/default/src/main/java/org/keycloak/crypto/def/DefaultCryptoProvider.java
+    line_start: 79
+    line_end: 189
+  - path: crypto/elytron/src/main/java/org/keycloak/crypto/elytron/WildFlyElytronProvider.java
+    line_start: 72
+    line_end: 82
+  - path: crypto/fips1402/src/main/java/org/keycloak/crypto/fips/FIPS1402Provider.java
+    line_start: 110
+    line_end: 237
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/4
+  base_sha: 690b0e4bef15654ea9037b0a26b3337e548c6b48
+  head_sha: 0f91e67b9025d978059b21b5c41283e5000a509c
+  diff_path: benchmark/diffs/keycloak-greptile/pr-4.diff
+  title: Add rolling-updates feature flag and compatibility framework
+  bug_desc: Incorrect method call for exit codes
+  bug_files:
+  - path: common/src/main/java/org/keycloak/common/Profile.java
+    line_start: 131
+    line_end: 139
+  - path: docs/guides/operator/advanced-configuration.adoc
+    line_start: 443
+    line_end: 485
+  - path: docs/guides/server/update-compatibility.adoc
+    line_start: 9
+    line_end: 137
+  - path: docs/guides/templates/kc.adoc
+    line_start: 50
+    line_end: 55
+  - path: operator/scripts/Dockerfile-custom-image
+    line_start: 2
+    line_end: 5
+  - path: operator/src/test/java/org/keycloak/operator/testsuite/integration/UpgradeTest.java
+    line_start: 17
+    line_end: 118
+  - path: quarkus/runtime/src/main/java/org/keycloak/quarkus/runtime/cli/command/AbstractUpdatesCommand.java
+    line_start: 80
+    line_end: 87
+  - path: quarkus/runtime/src/main/java/org/keycloak/quarkus/runtime/cli/command/UpdateCompatibilityCheck.java
+    line_start: 20
+    line_end: 53
+  - path: quarkus/runtime/src/main/java/org/keycloak/quarkus/runtime/cli/command/UpdateCompatibilityMetadata.java
+    line_start: 21
+    line_end: 53
+  - path: quarkus/runtime/src/main/java/org/keycloak/quarkus/runtime/compatibility/CompatibilityResult.java
+    line_start: 28
+    line_end: 38
+  - path: quarkus/tests/integration/src/test/java/org/keycloak/it/cli/dist/UpdateCommandDistTest.java
+    line_start: 41
+    line_end: 108
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/5
+  base_sha: baa6ebbeb8791017c01ce9fa63965f8dc584ddfe
+  head_sha: 7e5540896bbbafc02234b6ea2b15215dc24cb972
+  diff_path: benchmark/diffs/keycloak-greptile/pr-5.diff
+  title: Add Client resource type and scopes to authorization schema
+  bug_desc: Inconsistent feature flag bug causing orphaned permissions
+  bug_files:
+  - path: server-spi-private/src/main/java/org/keycloak/authorization/AdminPermissionsSchema.java
+    line_start: 50
+    line_end: 188
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/AdminPermissions.java
+    line_start: 74
+    line_end: 98
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/ClientPermissionEvaluator.java
+    line_start: 16
+    line_end: 192
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/ClientPermissionsV2.java
+    line_start: 1
+    line_end: 287
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/MgmtPermissionsV2.java
+    line_start: 26
+    line_end: 69
+  - path: tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/AbstractPermissionTest.java
+    line_start: 17
+    line_end: 180
+  - path: tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/PermissionClientTest.java
+    line_start: 19
+    line_end: 366
+  - path: tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/PermissionRESTTest.java
+    line_start: 126
+    line_end: 173
+  - path: tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/UserResourceTypeEvaluationTest.java
+    line_start: 18
+    line_end: 368
+  - path: tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/UserResourceTypePermissionTest.java
+    line_start: 64
+    line_end: 201
+  category: security
+  severity: high
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/6
+  base_sha: 7a8d18122aea42278332120093d5cefce9748356
+  head_sha: 679f44692dbc288bedc8f1535071c8467dbaf70c
+  diff_path: benchmark/diffs/keycloak-greptile/pr-6.diff
+  title: Add Groups resource type and scopes to authorization schema
+  bug_desc: Incorrect permission check in canManage() method
+  bug_files:
+  - path: rest/admin-ui-ext/src/main/java/org/keycloak/admin/ui/rest/BruteForceUsersResource.java
+    line_start: 144
+    line_end: 155
+  - path: server-spi-private/src/main/java/org/keycloak/authorization/AdminPermissionsSchema.java
+    line_start: 33
+    line_end: 190
+  - path: server-spi-private/src/main/java/org/keycloak/models/utils/ModelToRepresentation.java
+    line_start: 173
+    line_end: 178
+  - path: services/src/main/java/org/keycloak/services/resources/admin/GroupResource.java
+    line_start: 174
+    line_end: 209
+  - path: services/src/main/java/org/keycloak/services/resources/admin/GroupsResource.java
+    line_start: 47
+    line_end: 116
+  - path: services/src/main/java/org/keycloak/services/resources/admin/UsersResource.java
+    line_start: 71
+    line_end: 456
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/AdminPermissions.java
+    line_start: 71
+    line_end: 101
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/GroupPermissionEvaluator.java
+    line_start: 16
+    line_end: 148
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/GroupPermissions.java
+    line_start: 53
+    line_end: 343
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/GroupPermissionsV2.java
+    line_start: 1
+    line_end: 211
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/MgmtPermissionsV2.java
+    line_start: 24
+    line_end: 66
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/RolePermissions.java
+    line_start: 299
+    line_end: 305
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/UserPermissionEvaluator.java
+    line_start: 16
+    line_end: 166
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/UserPermissions.java
+    line_start: 177
+    line_end: 591
+  - path: services/src/main/java/org/keycloak/services/resources/admin/permissions/UserPermissionsV2.java
+    line_start: 45
+    line_end: 94
+  - path: test-framework/core/src/main/java/org/keycloak/testframework/util/ApiUtil.java
+    line_start: 6
+    line_end: 16
+  - path: tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/GroupResourceTypeEvaluationTest.java
+    line_start: 1
+    line_end: 320
+  - path: tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/RealmAdminPermissionsConfig.java
+    line_start: 31
+    line_end: 39
+  - path: tests/base/src/test/java/org/keycloak/tests/admin/authz/fgap/UserResourceTypeEvaluationTest.java
+    line_start: 32
+    line_end: 37
+  category: security
+  severity: high
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/7
+  base_sha: 21d53112849fe55f328f3de2f071989b8763de61
+  head_sha: 5d77e7ea7d431aa0a6b65904457b7471bd050e81
+  diff_path: benchmark/diffs/keycloak-greptile/pr-7.diff
+  title: Add HTML sanitizer for translated message resources
+  bug_desc: Lithuanian translation files contain Italian text
+  bug_files:
+  - path: js/apps/account-ui/maven-resources/theme/keycloak.v3/account/messages/messages_en.properties
+    line_start: 185
+    line_end: 191
+  - path: js/apps/admin-ui/maven-resources/theme/keycloak.v2/admin/messages/messages_en.properties
+    line_start: 3133
+    line_end: 3139
+  - path: misc/theme-verifier/pom.xml
+    line_start: 72
+    line_end: 88
+  - path: misc/theme-verifier/src/main/java/org/keycloak/themeverifier/VerifyMessageProperties.java
+    line_start: 17
+    line_end: 176
+  - path: misc/theme-verifier/src/test/java/org/keycloak/themeverifier/VerifyMessagePropertiesTest.java
+    line_start: 29
+    line_end: 54
+  - path: misc/theme-verifier/src/test/resources/changedAnchor_de.properties
+    line_start: 1
+    line_end: 17
+  - path: misc/theme-verifier/src/test/resources/changedAnchor_en.properties
+    line_start: 1
+    line_end: 17
+  - path: misc/theme-verifier/src/test/resources/illegalHtmlTag_en.properties
+    line_start: 1
+    line_end: 17
+  - path: misc/theme-verifier/src/test/resources/noHtml_de.properties
+    line_start: 1
+    line_end: 17
+  - path: misc/theme-verifier/src/test/resources/noHtml_en.properties
+    line_start: 1
+    line_end: 17
+  - path: themes/src/main/resources-community/theme/base/account/messages/messages_fi.properties
+    line_start: 138
+    line_end: 144
+  - path: themes/src/main/resources-community/theme/base/account/messages/messages_lt.properties
+    line_start: 98
+    line_end: 104
+  - path: themes/src/main/resources-community/theme/base/account/messages/messages_sk.properties
+    line_start: 98
+    line_end: 104
+  - path: themes/src/main/resources-community/theme/base/account/messages/messages_sv.properties
+    line_start: 93
+    line_end: 99
+  - path: themes/src/main/resources-community/theme/base/account/messages/messages_zh_CN.properties
+    line_start: 109
+    line_end: 115
+  - path: themes/src/main/resources-community/theme/base/email/messages/messages_da.properties
+    line_start: 6
+    line_end: 12
+  - path: themes/src/main/resources-community/theme/base/email/messages/messages_hu.properties
+    line_start: 3
+    line_end: 9
+  - path: themes/src/main/resources-community/theme/base/email/messages/messages_lt.properties
+    line_start: 1
+    line_end: 15
+  - path: themes/src/main/resources-community/theme/base/email/messages/messages_nl.properties
+    line_start: 1
+    line_end: 6
+  - path: themes/src/main/resources-community/theme/base/email/messages/messages_no.properties
+    line_start: 2
+    line_end: 8
+  - path: themes/src/main/resources-community/theme/base/login/messages/messages_lt.properties
+    line_start: 68
+    line_end: 74
+  - path: themes/src/main/resources-community/theme/base/login/messages/messages_no.properties
+    line_start: 68
+    line_end: 74
+  - path: themes/src/main/resources-community/theme/base/login/messages/messages_sk.properties
+    line_start: 27
+    line_end: 501
+  - path: themes/src/main/resources-community/theme/base/login/messages/messages_sv.properties
+    line_start: 65
+    line_end: 71
+  - path: themes/src/main/resources/theme/base/admin/messages/messages_en.properties
+    line_start: 66
+    line_end: 69
+  - path: themes/src/main/resources/theme/base/login/messages/messages_en.properties
+    line_start: 484
+    line_end: 533
+  category: logic
+  severity: low
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/8
+  base_sha: b545339e2c924263a498653f348610de0c09059c
+  head_sha: c8738721df2cd2d16fe16adec571b4192354a771
+  diff_path: benchmark/diffs/keycloak-greptile/pr-8.diff
+  title: Implement access token context encoding framework
+  bug_desc: Wrong parameter in null check (grantType vs. rawTokenId)
+  bug_files:
+  - path: server-spi-private/src/main/java/org/keycloak/models/Constants.java
+    line_start: 203
+    line_end: 209
+  - path: server-spi-private/src/main/java/org/keycloak/protocol/oidc/grants/OAuth2GrantType.java
+    line_start: 26
+    line_end: 178
+  - path: server-spi-private/src/main/java/org/keycloak/protocol/oidc/grants/OAuth2GrantTypeFactory.java
+    line_start: 26
+    line_end: 34
+  - path: services/src/main/java/org/keycloak/protocol/oidc/TokenManager.java
+    line_start: 64
+    line_end: 1058
+  - path: services/src/main/java/org/keycloak/protocol/oidc/encode/AccessTokenContext.java
+    line_start: 1
+    line_end: 95
+  - path: services/src/main/java/org/keycloak/protocol/oidc/encode/DefaultTokenContextEncoderProvider.java
+    line_start: 1
+    line_end: 124
+  - path: services/src/main/java/org/keycloak/protocol/oidc/encode/DefaultTokenContextEncoderProviderFactory.java
+    line_start: 1
+    line_end: 138
+  - path: services/src/main/java/org/keycloak/protocol/oidc/encode/TokenContextEncoderProvider.java
+    line_start: 1
+    line_end: 38
+  - path: services/src/main/java/org/keycloak/protocol/oidc/encode/TokenContextEncoderProviderFactory.java
+    line_start: 1
+    line_end: 28
+  - path: services/src/main/java/org/keycloak/protocol/oidc/encode/TokenContextEncoderSpi.java
+    line_start: 1
+    line_end: 51
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/AuthorizationCodeGrantTypeFactory.java
+    line_start: 29
+    line_end: 46
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/ClientCredentialsGrantTypeFactory.java
+    line_start: 35
+    line_end: 45
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/OAuth2GrantTypeBase.java
+    line_start: 42
+    line_end: 112
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/PermissionGrantTypeFactory.java
+    line_start: 35
+    line_end: 45
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/PreAuthorizedCodeGrantType.java
+    line_start: 29
+    line_end: 85
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/PreAuthorizedCodeGrantTypeFactory.java
+    line_start: 55
+    line_end: 65
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/RefreshTokenGrantTypeFactory.java
+    line_start: 30
+    line_end: 47
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/ResourceOwnerPasswordCredentialsGrantType.java
+    line_start: 31
+    line_end: 137
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/ResourceOwnerPasswordCredentialsGrantTypeFactory.java
+    line_start: 35
+    line_end: 45
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/TokenExchangeGrantTypeFactory.java
+    line_start: 37
+    line_end: 47
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/ciba/CibaGrantTypeFactory.java
+    line_start: 34
+    line_end: 51
+  - path: services/src/main/java/org/keycloak/protocol/oidc/grants/device/DeviceGrantTypeFactory.java
+    line_start: 34
+    line_end: 51
+  - path: services/src/main/java/org/keycloak/protocol/oidc/mappers/AbstractOIDCProtocolMapper.java
+    line_start: 81
+    line_end: 87
+  - path: services/src/main/java/org/keycloak/protocol/oidc/tokenexchange/StandardTokenExchangeProvider.java
+    line_start: 47
+    line_end: 240
+  - path: services/src/main/resources/META-INF/services/org.keycloak.protocol.oidc.encode.TokenContextEncoderProviderFactory
+    line_start: 1
+    line_end: 20
+  - path: services/src/main/resources/META-INF/services/org.keycloak.provider.Spi
+    line_start: 25
+    line_end: 31
+  - path: services/src/test/java/org/keycloak/protocol/oidc/encode/DefaultTokenContextEncoderProviderTest.java
+    line_start: 1
+    line_end: 114
+  - path: testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/AssertEvents.java
+    line_start: 30
+    line_end: 496
+  category: logic
+  severity: critical
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/9
+  base_sha: a0852eaa2ed19408ecf8ad02652802d00529a085
+  head_sha: 134437a5a7e31472763ffa2ac3cc91030e7ee389
+  diff_path: benchmark/diffs/keycloak-greptile/pr-9.diff
+  title: Implement recovery key support for user storage providers
+  bug_desc: Unsafe raw List deserialization without type safety
+  bug_files:
+  - path: server-spi-private/src/main/java/org/keycloak/utils/CredentialHelper.java
+    line_start: 33
+    line_end: 135
+  - path: server-spi/src/main/java/org/keycloak/models/utils/RecoveryAuthnCodesUtils.java
+    line_start: 1
+    line_end: 63
+  - path: services/src/main/java/org/keycloak/authentication/authenticators/browser/RecoveryAuthnCodesFormAuthenticator.java
+    line_start: 77
+    line_end: 83
+  - path: services/src/main/java/org/keycloak/authentication/requiredactions/RecoveryAuthnCodesAction.java
+    line_start: 2
+    line_end: 119
+  - path: services/src/main/java/org/keycloak/forms/login/freemarker/model/RecoveryAuthnCodeInputLoginBean.java
+    line_start: 5
+    line_end: 22
+  - path: testsuite/integration-arquillian/servers/auth-server/services/testsuite-providers/src/main/java/org/keycloak/testsuite/federation/BackwardsCompatibilityUserStorage.java
+    line_start: 18
+    line_end: 442
+  - path: testsuite/integration-arquillian/servers/auth-server/services/testsuite-providers/src/main/java/org/keycloak/testsuite/federation/BackwardsCompatibilityUserStorageFactory.java
+    line_start: 50
+    line_end: 58
+  - path: testsuite/integration-arquillian/tests/base/src/test/java/org/keycloak/testsuite/federation/storage/BackwardsCompatibilityUserStorageTest.java
+    line_start: 24
+    line_end: 487
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/keycloak-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/keycloak-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/10
+  base_sha: e92b825a14800e42f42d5f22ee314e94cf7c4e27
+  head_sha: 332c9b6e4a1288705f173a9b797742859384d1e0
+  diff_path: benchmark/diffs/keycloak-greptile/pr-10.diff
+  title: Fix concurrent group access to prevent NullPointerException
+  bug_desc: Missing null check causing NullPointerException
+  bug_files:
+  - path: model/infinispan/src/main/java/org/keycloak/models/cache/infinispan/GroupAdapter.java
+    line_start: 271
+    line_end: 278
+  - path: model/infinispan/src/main/java/org/keycloak/models/cache/infinispan/entities/CachedGroup.java
+    line_start: 58
+    line_end: 64
+  - path: services/src/main/java/org/keycloak/utils/GroupUtils.java
+    line_start: 98
+    line_end: 101
+  - path: tests/base/src/test/java/org/keycloak/tests/admin/group/GroupTest.java
+    line_start: 25
+    line_end: 162
+  category: logic
+  severity: critical
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/1
+  base_sha: 3f71fa15c93bb0b751bb92abae1b5dc9a21bd4ca
+  head_sha: ffbaf8c54269df2ce510de91245760fddce09896
+  diff_path: benchmark/diffs/discourse-greptile/pr-1.diff
+  title: 'FEATURE: automatically downsize large images'
+  bug_desc: Method overwriting causing parameter mismatch
+  bug_files:
+  - path: app/assets/javascripts/discourse/lib/utilities.js
+    line_start: 179
+    line_end: 249
+  - path: app/controllers/uploads_controller.rb
+    line_start: 52
+    line_end: 74
+  - path: app/models/optimized_image.rb
+    line_start: 139
+    line_end: 162
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/2
+  base_sha: 56abd247e1829cb6de82dfcc8ce04deb5f0d1e91
+  head_sha: 6669a2d94d76eea3b99b8c476d12b1eb66726b07
+  diff_path: benchmark/diffs/discourse-greptile/pr-2.diff
+  title: 'FEATURE: per-topic unsubscribe option in emails'
+  bug_desc: Nil reference non-existent TopicUser
+  bug_files:
+  - path: app/assets/javascripts/discourse/components/dropdown-button.js.es6
+    line_start: 24
+    line_end: 34
+  - path: app/assets/javascripts/discourse/controllers/topic-unsubscribe.js.es6
+    line_start: 1
+    line_end: 9
+  - path: app/assets/javascripts/discourse/routes/app-route-map.js.es6
+    line_start: 10
+    line_end: 16
+  - path: app/assets/javascripts/discourse/routes/topic-from-params.js.es6
+    line_start: 2
+    line_end: 49
+  - path: app/assets/javascripts/discourse/routes/topic-unsubscribe.js.es6
+    line_start: 1
+    line_end: 23
+  - path: app/assets/javascripts/discourse/templates/topic/unsubscribe.hbs
+    line_start: 1
+    line_end: 8
+  - path: app/assets/javascripts/discourse/views/topic-unsubscribe.js.es6
+    line_start: 1
+    line_end: 3
+  - path: app/assets/stylesheets/common/base/topic.scss
+    line_start: 63
+    line_end: 77
+  - path: app/controllers/topics_controller.rb
+    line_start: 24
+    line_end: 503
+  - path: app/mailers/user_notifications.rb
+    line_start: 292
+    line_end: 313
+  - path: app/models/topic.rb
+    line_start: 716
+    line_end: 725
+  - path: app/models/topic_user.rb
+    line_start: 7
+    line_end: 221
+  - path: app/views/email/notification.html.erb
+    line_start: 1
+    line_end: 29
+  - path: config/locales/client.en.yml
+    line_start: 981
+    line_end: 1022
+  - path: config/locales/server.en.yml
+    line_start: 1849
+    line_end: 1858
+  - path: config/routes.rb
+    line_start: 434
+    line_end: 445
+  - path: lib/email/message_builder.rb
+    line_start: 21
+    line_end: 71
+  - path: spec/components/email/message_builder_spec.rb
+    line_start: 168
+    line_end: 175
+  category: static
+  severity: high
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/3
+  base_sha: e25638dab0d4b98f99c8fe8976ccaae8f4fb9db3
+  head_sha: 5f8a130277dbddc95d133cd2832be639baf89213
+  diff_path: benchmark/diffs/discourse-greptile/pr-3.diff
+  title: Add comprehensive email validation for blocked users
+  bug_desc: BlockedEmail.should_block? modifies DB during read
+  bug_files:
+  - path: app/assets/javascripts/discourse/controllers/create_account_controller.js
+    line_start: 14
+    line_end: 279
+  - path: app/controllers/users_controller.rb
+    line_start: 194
+    line_end: 202
+  - path: app/models/blocked_email.rb
+    line_start: 1
+    line_end: 25
+  - path: app/models/user.rb
+    line_start: 42
+    line_end: 569
+  - path: config/locales/server.en.yml
+    line_start: 731
+    line_end: 737
+  - path: db/migrate/20130724201552_create_blocked_emails.rb
+    line_start: 1
+    line_end: 12
+  - path: lib/validators/email_validator.rb
+    line_start: 1
+    line_end: 24
+  - path: spec/components/validators/email_validator_spec.rb
+    line_start: 1
+    line_end: 23
+  - path: spec/fabricators/blocked_email_fabricator.rb
+    line_start: 1
+    line_end: 4
+  - path: spec/models/blocked_email_spec.rb
+    line_start: 1
+    line_end: 48
+  category: logic
+  severity: critical
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/4
+  base_sha: 62db063e1e1abe691313ab42682a68f796d63769
+  head_sha: 4f8aed295a29954023b2849c060ef4fb299d1b5d
+  diff_path: benchmark/diffs/discourse-greptile/pr-4.diff
+  title: Enhance embed URL handling and validation system
+  bug_desc: SSRF vulnerability using open(url) without validation
+  bug_files:
+  - path: Gemfile
+    line_start: 206
+    line_end: 215
+  - path: Gemfile_rails4.lock
+    line_start: 117
+    line_end: 486
+  - path: app/assets/javascripts/embed.js
+    line_start: 1
+    line_end: 27
+  - path: app/assets/stylesheets/embed.css.scss
+    line_start: 1
+    line_end: 69
+  - path: app/controllers/embed_controller.rb
+    line_start: 1
+    line_end: 34
+  - path: app/jobs/regular/retrieve_topic.rb
+    line_start: 1
+    line_end: 24
+  - path: app/jobs/scheduled/poll_feed.rb
+    line_start: 1
+    line_end: 41
+  - path: app/models/post.rb
+    line_start: 60
+    line_end: 138
+  - path: app/models/topic_embed.rb
+    line_start: 1
+    line_end: 82
+  - path: app/views/embed/best.html.erb
+    line_start: 1
+    line_end: 30
+  - path: app/views/embed/loading.html.erb
+    line_start: 1
+    line_end: 12
+  - path: app/views/layouts/embed.html.erb
+    line_start: 1
+    line_end: 20
+  - path: config/locales/client.en.yml
+    line_start: 1474
+    line_end: 1480
+  - path: config/locales/server.en.yml
+    line_start: 29
+    line_end: 775
+  - path: config/routes.rb
+    line_start: 242
+    line_end: 249
+  - path: config/site_settings.yml
+    line_start: 350
+    line_end: 361
+  - path: db/migrate/20131217174004_create_topic_embeds.rb
+    line_start: 1
+    line_end: 13
+  - path: db/migrate/20131219203905_add_cook_method_to_posts.rb
+    line_start: 1
+    line_end: 5
+  - path: db/migrate/20131223171005_create_top_topics.rb
+    line_start: 1
+    line_end: 6
+  - path: lib/post_creator.rb
+    line_start: 213
+    line_end: 219
+  - path: lib/post_revisor.rb
+    line_start: 11
+    line_end: 89
+  - path: lib/tasks/disqus.thor
+    line_start: 114
+    line_end: 151
+  - path: lib/topic_retriever.rb
+    line_start: 1
+    line_end: 55
+  - path: spec/components/topic_retriever_spec.rb
+    line_start: 1
+    line_end: 46
+  - path: spec/controllers/embed_controller_spec.rb
+    line_start: 1
+    line_end: 58
+  - path: spec/jobs/poll_feed_spec.rb
+    line_start: 1
+    line_end: 40
+  - path: spec/models/topic_embed_spec.rb
+    line_start: 1
+    line_end: 48
+  category: security
+  severity: critical
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/5
+  base_sha: 98fa098e6fade3097a11fe7f99a98a4e6ffb4728
+  head_sha: 5b229316ee4c661836ed1161139692a3e8527444
+  diff_path: benchmark/diffs/discourse-greptile/pr-5.diff
+  title: Optimize header layout performance with flexbox mixins
+  bug_desc: 'Mixing float: left with flexbox causes layout issues'
+  bug_files:
+  - path: app/assets/stylesheets/common/base/header.scss
+    line_start: 13
+    line_end: 42
+  - path: app/assets/stylesheets/common/base/topic-post.scss
+    line_start: 261
+    line_end: 305
+  - path: app/assets/stylesheets/common/base/topic.scss
+    line_start: 27
+    line_end: 37
+  - path: app/assets/stylesheets/common/components/badges.css.scss
+    line_start: 52
+    line_end: 61
+  - path: app/assets/stylesheets/common/foundation/mixins.scss
+    line_start: 92
+    line_end: 131
+  category: logic
+  severity: low
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/6
+  base_sha: 7a5fbae060bd0d3e29f3a4b5c6f2bfd8b2914dc7
+  head_sha: 267d8be1f556ed59639ced396c885bb44586da19
+  diff_path: benchmark/diffs/discourse-greptile/pr-6.diff
+  title: 'UX: show complete URL path if website domain is same as instance domain'
+  bug_desc: String mutation with << operator
+  bug_files:
+  - path: app/assets/javascripts/discourse/controllers/user.js.es6
+    line_start: 14
+    line_end: 19
+  - path: app/assets/javascripts/discourse/models/user.js.es6
+    line_start: 56
+    line_end: 62
+  - path: app/assets/javascripts/discourse/templates/user/user.hbs
+    line_start: 63
+    line_end: 74
+  - path: app/serializers/user_serializer.rb
+    line_start: 40
+    line_end: 159
+  - path: spec/serializers/user_serializer_spec.rb
+    line_start: 66
+    line_end: 93
+  category: logic
+  severity: medium
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/7
+  base_sha: 7554b5e3c458dc79b591d5e874e79ab10cf30c2f
+  head_sha: d38c4d5f7443223c81529c22470293771baf9f38
+  diff_path: benchmark/diffs/discourse-greptile/pr-7.diff
+  title: scale-color $lightness must use $secondary for dark themes
+  bug_desc: Inconsistent theme color lightness affects visibility
+  bug_files:
+  - path: app/assets/stylesheets/common/admin/admin_base.scss
+    line_start: 382
+    line_end: 1334
+  - path: app/assets/stylesheets/common/base/_topic-list.scss
+    line_start: 45
+    line_end: 302
+  - path: app/assets/stylesheets/common/base/discourse.scss
+    line_start: 73
+    line_end: 85
+  - path: app/assets/stylesheets/common/base/header.scss
+    line_start: 150
+    line_end: 335
+  - path: app/assets/stylesheets/common/base/login.scss
+    line_start: 36
+    line_end: 55
+  - path: app/assets/stylesheets/common/base/notification-options.scss
+    line_start: 1
+    line_end: 5
+  - path: app/assets/stylesheets/common/base/search.scss
+    line_start: 28
+    line_end: 40
+  - path: app/assets/stylesheets/common/base/share_link.scss
+    line_start: 59
+    line_end: 65
+  - path: app/assets/stylesheets/common/base/topic-post.scss
+    line_start: 12
+    line_end: 162
+  - path: app/assets/stylesheets/common/base/user-badges.scss
+    line_start: 59
+    line_end: 100
+  - path: app/assets/stylesheets/common/base/user.scss
+    line_start: 116
+    line_end: 132
+  - path: app/assets/stylesheets/common/components/badges.css.scss
+    line_start: 236
+    line_end: 288
+  - path: app/assets/stylesheets/common/components/buttons.css.scss
+    line_start: 57
+    line_end: 63
+  - path: app/assets/stylesheets/desktop/compose.scss
+    line_start: 337
+    line_end: 343
+  - path: app/assets/stylesheets/desktop/header.scss
+    line_start: 50
+    line_end: 62
+  - path: app/assets/stylesheets/desktop/login.scss
+    line_start: 14
+    line_end: 51
+  - path: app/assets/stylesheets/desktop/modal.scss
+    line_start: 47
+    line_end: 134
+  - path: app/assets/stylesheets/desktop/queued-posts.scss
+    line_start: 11
+    line_end: 17
+  - path: app/assets/stylesheets/desktop/topic-list.scss
+    line_start: 36
+    line_end: 230
+  - path: app/assets/stylesheets/desktop/topic-post.scss
+    line_start: 31
+    line_end: 961
+  - path: app/assets/stylesheets/desktop/topic.scss
+    line_start: 58
+    line_end: 72
+  - path: app/assets/stylesheets/desktop/upload.scss
+    line_start: 17
+    line_end: 23
+  - path: app/assets/stylesheets/desktop/user.scss
+    line_start: 56
+    line_end: 606
+  - path: app/assets/stylesheets/embed.css.scss
+    line_start: 86
+    line_end: 92
+  - path: app/assets/stylesheets/mobile/compose.scss
+    line_start: 33
+    line_end: 175
+  - path: app/assets/stylesheets/mobile/login.scss
+    line_start: 14
+    line_end: 48
+  - path: app/assets/stylesheets/mobile/modal.scss
+    line_start: 99
+    line_end: 105
+  - path: app/assets/stylesheets/mobile/topic-list.scss
+    line_start: 72
+    line_end: 212
+  - path: app/assets/stylesheets/mobile/topic-post.scss
+    line_start: 46
+    line_end: 501
+  - path: app/assets/stylesheets/mobile/topic.scss
+    line_start: 31
+    line_end: 37
+  - path: app/assets/stylesheets/mobile/upload.scss
+    line_start: 7
+    line_end: 13
+  - path: app/assets/stylesheets/mobile/user.scss
+    line_start: 112
+    line_end: 583
+  category: logic
+  severity: low
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/8
+  base_sha: 4975fc28903a84418f546b2809370f19abf10e08
+  head_sha: 060cda77729cb1c4a827560e09e89a7b22078ba9
+  diff_path: benchmark/diffs/discourse-greptile/pr-8.diff
+  title: 'FIX: proper handling of group memberships'
+  bug_desc: Race conditions in async member loading
+  bug_files:
+  - path: app/assets/javascripts/admin/controllers/admin-group.js.es6
+    line_start: 1
+    line_end: 80
+  - path: app/assets/javascripts/admin/routes/admin_group_route.js
+    line_start: 8
+    line_end: 17
+  - path: app/assets/javascripts/admin/templates/group.hbs
+    line_start: 1
+    line_end: 53
+  - path: app/assets/javascripts/admin/templates/group_member.hbs
+    line_start: 1
+    line_end: 1
+  - path: app/assets/javascripts/admin/views/group-member.js.es6
+    line_start: 1
+    line_end: 4
+  - path: app/assets/javascripts/discourse/models/group.js
+    line_start: 7
+    line_end: 86
+  - path: app/assets/javascripts/discourse/routes/group-members.js.es6
+    line_start: 5
+    line_end: 14
+  - path: app/assets/javascripts/discourse/templates/components/admin-group-selector.hbs
+    line_start: 1
+    line_end: 1
+  - path: app/assets/javascripts/discourse/templates/group/members.hbs
+    line_start: 3
+    line_end: 9
+  - path: app/assets/javascripts/discourse/templates/user-selector-autocomplete.raw.hbs
+    line_start: 2
+    line_end: 22
+  - path: app/assets/stylesheets/common/admin/admin_base.scss
+    line_start: 161
+    line_end: 484
+  - path: app/controllers/admin/groups_controller.rb
+    line_start: 1
+    line_end: 104
+  - path: app/controllers/groups_controller.rb
+    line_start: 19
+    line_end: 47
+  - path: config/locales/client.en.yml
+    line_start: 1620
+    line_end: 1636
+  - path: config/routes.rb
+    line_start: 46
+    line_end: 53
+  - path: spec/controllers/admin/groups_controller_spec.rb
+    line_start: 10
+    line_end: 134
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/9
+  base_sha: 728845d008f06828630a632e5c7d67e11bf15deb
+  head_sha: ecfa17b5a79dfdc91e7a4d50b42ae78a35d0a293
+  diff_path: benchmark/diffs/discourse-greptile/pr-9.diff
+  title: 'FEATURE: Localization fallbacks (server-side)'
+  bug_desc: Thread-safety issue with lazy @loaded_locales
+  bug_files:
+  - path: app/controllers/application_controller.rb
+    line_start: 155
+    line_end: 162
+  - path: config/cloud/cloud66/files/production.rb
+    line_start: 23
+    line_end: 28
+  - path: config/environments/production.rb
+    line_start: 24
+    line_end: 29
+  - path: config/environments/profile.rb
+    line_start: 27
+    line_end: 32
+  - path: config/initializers/i18n.rb
+    line_start: 1
+    line_end: 24
+  - path: config/initializers/pluralization.rb
+    line_start: 1
+    line_end: 1
+  - path: lib/freedom_patches/translate_accelerator.rb
+    line_start: 59
+    line_end: 69
+  category: logic
+  severity: high
+- repo: ai-code-review-evaluation/discourse-greptile
+  fork_url: https://github.com/ai-code-review-evaluation/discourse-greptile.git
+  pr_url: https://github.com/ai-code-review-evaluation/discourse-greptile/pull/10
+  base_sha: 913c3d6f636d02b3dd6c2c022ca1af2bec95d752
+  head_sha: d1c69189f3c90ecf56013a8da904da9bff9a8e19
+  diff_path: benchmark/diffs/discourse-greptile/pr-10.diff
+  title: 'FEATURE: Can edit category/host relationships for embedding'
+  bug_desc: NoMethodError before_validation in EmbeddableHost
+  bug_files:
+  - path: app/assets/javascripts/admin/adapters/embedding.js.es6
+    line_start: 1
+    line_end: 7
+  - path: app/assets/javascripts/admin/components/embeddable-host.js.es6
+    line_start: 1
+    line_end: 63
+  - path: app/assets/javascripts/admin/controllers/admin-embedding.js.es6
+    line_start: 1
+    line_end: 18
+  - path: app/assets/javascripts/admin/routes/admin-embedding.js.es6
+    line_start: 1
+    line_end: 9
+  - path: app/assets/javascripts/admin/routes/admin-route-map.js.es6
+    line_start: 27
+    line_end: 33
+  - path: app/assets/javascripts/admin/templates/components/embeddable-host.hbs
+    line_start: 1
+    line_end: 19
+  - path: app/assets/javascripts/admin/templates/customize.hbs
+    line_start: 5
+    line_end: 11
+  - path: app/assets/javascripts/admin/templates/embedding.hbs
+    line_start: 1
+    line_end: 15
+  - path: app/assets/javascripts/discourse/adapters/rest.js.es6
+    line_start: 1
+    line_end: 25
+  - path: app/assets/javascripts/discourse/models/store.js.es6
+    line_start: 189
+    line_end: 212
+  - path: app/controllers/admin/embeddable_hosts_controller.rb
+    line_start: 1
+    line_end: 34
+  - path: app/controllers/admin/embedding_controller.rb
+    line_start: 1
+    line_end: 21
+  - path: app/controllers/embed_controller.rb
+    line_start: 58
+    line_end: 64
+  - path: app/models/embeddable_host.rb
+    line_start: 1
+    line_end: 24
+  - path: app/models/site_setting.rb
+    line_start: 68
+    line_end: 73
+  - path: app/models/topic.rb
+    line_start: 866
+    line_end: 872
+  - path: app/models/topic_embed.rb
+    line_start: 33
+    line_end: 46
+  - path: app/serializers/embeddable_host_serializer.rb
+    line_start: 1
+    line_end: 16
+  - path: app/serializers/embedding_serializer.rb
+    line_start: 1
+    line_end: 8
+  - path: config/locales/client.en.yml
+    line_start: 2491
+    line_end: 2504
+  - path: config/locales/server.en.yml
+    line_start: 1164
+    line_end: 1174
+  - path: config/routes.rb
+    line_start: 135
+    line_end: 156
+  - path: config/site_settings.yml
+    line_start: 759
+    line_end: 770
+  - path: db/migrate/20150818190757_create_embeddable_hosts.rb
+    line_start: 1
+    line_end: 33
+  - path: lib/topic_retriever.rb
+    line_start: 13
+    line_end: 19
+  - path: spec/controllers/admin/embeddable_hosts_controller_spec.rb
+    line_start: 1
+    line_end: 9
+  - path: spec/controllers/admin/embedding_controller_spec.rb
+    line_start: 1
+    line_end: 9
+  - path: spec/controllers/embed_controller_spec.rb
+    line_start: 11
+    line_end: 73
+  - path: spec/fabricators/category_fabricator.rb
+    line_start: 1
+    line_end: 4
+  - path: spec/fabricators/embeddable_host_fabricator.rb
+    line_start: 1
+    line_end: 27
+  - path: spec/models/embeddable_host_spec.rb
+    line_start: 1
+    line_end: 40
+  - path: spec/models/site_setting_spec.rb
+    line_start: 4
+    line_end: 9
+  - path: spec/models/topic_embed_spec.rb
+    line_start: 12
+    line_end: 41
+  - path: spec/models/topic_spec.rb
+    line_start: 1238
+    line_end: 1430
+  - path: test/javascripts/helpers/create-pretender.js.es6
+    line_start: 39
+    line_end: 235
+  - path: test/javascripts/models/store-test.js.es6
+    line_start: 106
+    line_end: 136
+  category: logic
+  severity: critical

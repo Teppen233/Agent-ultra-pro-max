@@ -16,16 +16,21 @@ from pydantic import BaseModel, Field
 from reviewcrew.events import EventLogger
 from reviewcrew.models import PipelineEvent, WorkflowNode
 from reviewcrew.pipeline.orchestrator import Orchestrator
+from reviewcrew.server.benchmark import (
+    BenchmarkConflict,
+    BenchmarkEntry,
+    BenchmarkInputError,
+    BenchmarkStore,
+)
+from reviewcrew.server.greptile_benchmark import (
+    GREPTILE_BENCHMARK_CAPACITY,
+    load_greptile_entries,
+)
 from reviewcrew.server.replay import (
     encode_sse,
     load_events_jsonl,
     replay_events,
     tail_events_file,
-)
-from reviewcrew.server.benchmark import (
-    BenchmarkConflict,
-    BenchmarkInputError,
-    BenchmarkStore,
 )
 from reviewcrew.server.repository import prepare_repository
 
@@ -35,6 +40,7 @@ RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 class ReviewRequest(BaseModel):
     pr_url: str = Field(min_length=1)
     repo_path: str | None = None
+    run_name: str | None = Field(default=None, max_length=160)
     add_to_benchmark: bool = False
 
 
@@ -112,6 +118,11 @@ def create_app(
             except BenchmarkInputError as error:
                 raise HTTPException(status_code=422, detail=str(error)) from error
         logger = EventLogger(run_id, runs_dir)
+        run_name = request.run_name.strip() if request.run_name else None
+        run_path(run_id).joinpath("metadata.json").write_text(
+            json.dumps({"name": run_name, "source": request.pr_url}, ensure_ascii=False),
+            encoding="utf-8",
+        )
         automatic_checkout = not request.repo_path or not request.repo_path.strip()
         logger.emit(
             PipelineEvent(
@@ -211,9 +222,16 @@ def create_app(
                 continue
             events_path = directory / "events.jsonl"
             events = load_events_jsonl(events_path) if events_path.exists() else []
+            metadata_path = directory / "metadata.json"
+            metadata = (
+                json.loads(metadata_path.read_text(encoding="utf-8"))
+                if metadata_path.exists()
+                else {}
+            )
             output.append(
                 {
                     "run_id": directory.name,
+                    "name": metadata.get("name"),
                     "status": (
                         "done"
                         if any(event.type == "report" for event in events)
@@ -247,25 +265,43 @@ def create_app(
             events = load_events_jsonl(events_path)
         report_path = directory / "report.md"
         diff_path = directory / "change.diff"
+        metadata_path = directory / "metadata.json"
+        metadata = (
+            json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
+        )
         return {
             "run_id": run_id,
+            "name": metadata.get("name"),
             "events": [event.model_dump(exclude_none=True) for event in events],
             "report": report_path.read_text(encoding="utf-8") if report_path.exists() else None,
             "diff": diff_path.read_text(encoding="utf-8") if diff_path.exists() else None,
         }
 
+    def listed_benchmark_entries() -> tuple[int, list[BenchmarkEntry]]:
+        curated = load_greptile_entries(
+            benchmark_results_dir / "backend-runs.json",
+            runs_dir,
+            application.state.active_run_ids,
+        )
+        if curated is not None:
+            return GREPTILE_BENCHMARK_CAPACITY, curated
+        return (
+            benchmark_store.capacity,
+            benchmark_store.list_entries(application.state.active_run_ids),
+        )
+
     @application.get("/api/benchmark/entries")
     async def benchmark_entries() -> dict[str, object]:
-        entries = benchmark_store.list_entries(application.state.active_run_ids)
+        capacity, entries = listed_benchmark_entries()
         return {
-            "capacity": benchmark_store.capacity,
+            "capacity": capacity,
             "count": len(entries),
             "entries": [entry.model_dump(mode="json") for entry in entries],
         }
 
     @application.get("/api/benchmark/entries/{run_id}")
     async def benchmark_entry(run_id: str) -> dict[str, object]:
-        entries = benchmark_store.list_entries(application.state.active_run_ids)
+        _, entries = listed_benchmark_entries()
         entry = next((item for item in entries if item.run_id == run_id), None)
         if entry is None:
             raise HTTPException(status_code=404, detail="Benchmark 条目不存在")

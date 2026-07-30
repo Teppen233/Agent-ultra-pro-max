@@ -4,6 +4,7 @@ import json
 import re
 import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal
@@ -41,6 +42,7 @@ class BenchmarkIdentity(BaseModel):
 
 class BenchmarkEntry(BaseModel):
     run_id: str
+    name: str | None = None
     repository: str
     repository_name: str
     pr_url: str
@@ -56,7 +58,7 @@ def _lock_for(path: Path) -> threading.RLock:
         return _LOCKS.setdefault(key, threading.RLock())
 
 
-def _identity(pr_url: str) -> BenchmarkIdentity:
+def benchmark_identity(pr_url: str) -> BenchmarkIdentity:
     normalized = pr_url.strip()
     repository = github_repository(normalized)
     match = _PR_NUMBER.fullmatch(normalized)
@@ -109,10 +111,8 @@ class BenchmarkStore:
                 temp_path = Path(temporary.name)
             temp_path.replace(self.index_path)
         except OSError as error:
-            try:
+            with suppress(UnboundLocalError, OSError):
                 temp_path.unlink(missing_ok=True)
-            except (UnboundLocalError, OSError):
-                pass
             raise BenchmarkStoreError("无法写入 Benchmark 索引。") from error
 
     def list_entries(self, active_run_ids: set[str]) -> list[BenchmarkEntry]:
@@ -123,7 +123,9 @@ class BenchmarkStore:
             for entry in entries:
                 report = self.runs_dir / entry.run_id / "report.md"
                 if entry.status != "ready" and report.exists():
-                    entry = entry.model_copy(update={"status": "ready", "completed_at": time.time()})
+                    entry = entry.model_copy(
+                        update={"status": "ready", "completed_at": time.time()}
+                    )
                     changed = True
                 elif (
                     entry.status != "ready"
@@ -142,16 +144,14 @@ class BenchmarkStore:
             return next((entry for entry in self._read() if entry.run_id == run_id), None)
 
     def reserve(self, run_id: str, pr_url: str) -> BenchmarkEntry:
-        identity = _identity(pr_url)
+        identity = benchmark_identity(pr_url)
         with self._lock:
             entries = self._read()
             if any(entry.repository == identity.repository for entry in entries):
                 raise BenchmarkConflict(f"仓库 {identity.repository} 已存在于 Benchmark。")
             if len(entries) >= self.capacity:
                 raise BenchmarkConflict(f"Benchmark 已满，最多只能添加 {self.capacity} 个仓库。")
-            entry = BenchmarkEntry(
-                run_id=run_id, **identity.model_dump(), created_at=time.time()
-            )
+            entry = BenchmarkEntry(run_id=run_id, **identity.model_dump(), created_at=time.time())
             self._write([*entries, entry])
             return entry
 
@@ -163,7 +163,9 @@ class BenchmarkStore:
                     updated = entry.model_copy(
                         update={
                             "status": status,
-                            "completed_at": time.time() if status == "ready" else entry.completed_at,
+                            "completed_at": (
+                                time.time() if status == "ready" else entry.completed_at
+                            ),
                         }
                     )
                     entries[index] = updated

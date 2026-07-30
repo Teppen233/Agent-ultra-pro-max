@@ -10,6 +10,7 @@ import BenchmarkView from './BenchmarkView.vue'
 
 const ENTRY: BenchmarkEntrySummary = {
   run_id: 'run-1',
+  name: 'Greptile sentry PR #1 - Pagination',
   repository: 'ai-code-review-evaluation/sentry-greptile',
   repository_name: 'sentry-greptile',
   pr_url: 'https://github.com/ai-code-review-evaluation/sentry-greptile/pull/1',
@@ -18,6 +19,25 @@ const ENTRY: BenchmarkEntrySummary = {
   created_at: 100,
   completed_at: 140,
 }
+
+const GREPTILE_ENTRIES: BenchmarkEntrySummary[] = [
+  'sentry',
+  'cal.com',
+  'grafana',
+  'keycloak',
+  'discourse',
+].flatMap((repository, repositoryIndex) =>
+  [1, 2].map((caseNumber) => ({
+    ...ENTRY,
+    run_id: `${repository}-${caseNumber}`,
+    name: `Greptile ${repository} PR #${caseNumber} - Case ${caseNumber}`,
+    repository: `ai-code-review-evaluation/${repository}-greptile`,
+    repository_name: `${repository}-greptile`,
+    pr_url: `https://github.com/ai-code-review-evaluation/${repository}-greptile/pull/${caseNumber}`,
+    pr_number: caseNumber,
+    created_at: repositoryIndex * 10 + caseNumber,
+  })),
+)
 
 const FINDING: Finding = {
   id: 'F1',
@@ -98,10 +118,37 @@ describe('BenchmarkView', () => {
     expect(wrapper.text()).toContain('PR #1')
     expect(wrapper.text()).toContain('越权访问')
     expect(wrapper.text()).toContain('40 秒')
-    expect(wrapper.get('[aria-label="查看完整审计"]').attributes('href')).toContain(
+    expect(wrapper.get('[aria-label="回放完整审计"]').attributes('href')).toContain(
       `/review/${ENTRY.run_id}`,
     )
     expect(fetchMock).toHaveBeenCalledWith('/api/benchmark/entries/run-1')
+  })
+
+  it('groups ten Greptile cases into five replayable repositories', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() =>
+        response({ capacity: 10, count: 10, entries: GREPTILE_ENTRIES }),
+      )
+      .mockImplementationOnce(() =>
+        response({
+          entry: GREPTILE_ENTRIES[0],
+          run: { ...RUN_DETAIL, run_id: GREPTILE_ENTRIES[0]?.run_id },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountView()
+
+    await flushPromises()
+
+    expect(wrapper.findAll('.repository-group')).toHaveLength(5)
+    expect(wrapper.findAll('.repository-item')).toHaveLength(10)
+    expect(wrapper.text()).toContain('10 / 10')
+    expect(wrapper.text()).toContain('评测任务')
+    expect(wrapper.text()).toContain('Greptile keycloak PR #2 - Case 2')
+    expect(wrapper.get('[aria-label="回放完整审计"]').attributes('href')).toContain(
+      `/review/${GREPTILE_ENTRIES[0]?.run_id}`,
+    )
   })
 
   it('shows progress for a running audit without fake result metrics', async () => {
@@ -118,5 +165,19 @@ describe('BenchmarkView', () => {
     expect(wrapper.text()).toContain('审计完成后将在这里显示原始结果')
     expect(wrapper.text()).not.toContain('全部问题')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('distinguishes a loading failure from an empty collection', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('{}', { status: 404 }))),
+    )
+    const wrapper = mountView()
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Benchmark 列表加载失败')
+    expect(wrapper.text()).toContain('重新加载')
+    expect(wrapper.text()).not.toContain('还没有加入 Benchmark 的审计')
   })
 })

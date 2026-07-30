@@ -6,9 +6,10 @@ import {
   Clock3,
   ExternalLink,
   GitPullRequest,
+  RefreshCw,
   ShieldAlert,
 } from 'lucide-vue-next'
-import { NEmpty, NSkeleton, NTag, useMessage } from 'naive-ui'
+import { NButton, NEmpty, NSkeleton, NTag, useMessage } from 'naive-ui'
 import { computed, onMounted, ref } from 'vue'
 
 import FindingCard from '@/components/FindingCard.vue'
@@ -29,6 +30,7 @@ interface BenchmarkDetail {
 
 const message = useMessage()
 const collectionLoading = ref(true)
+const collectionError = ref<string | null>(null)
 const detailLoading = ref(false)
 const entries = ref<BenchmarkEntrySummary[]>([])
 const capacity = ref(5)
@@ -39,6 +41,17 @@ let detailRequestToken = 0
 const selectedEntry = computed(
   () => entries.value.find((entry) => entry.run_id === selectedRunId.value) ?? null,
 )
+const repositoryGroups = computed(() => {
+  const groups = new Map<string, BenchmarkEntrySummary[]>()
+  for (const entry of entries.value) {
+    groups.set(entry.repository, [...(groups.get(entry.repository) ?? []), entry])
+  }
+  return [...groups.entries()].map(([repository, cases]) => ({
+    repository,
+    repositoryName: cases[0]?.repository_name ?? repository,
+    cases,
+  }))
+})
 
 const findings = computed(() => deriveFindings(selectedRun.value?.events ?? []))
 const keptCount = computed(
@@ -132,7 +145,9 @@ async function selectEntry(runId: string) {
   }
 }
 
-onMounted(async () => {
+async function loadCollection() {
+  collectionLoading.value = true
+  collectionError.value = null
   try {
     const response = await fetch('/api/benchmark/entries')
     if (!response.ok) throw new Error('Benchmark 列表加载失败')
@@ -141,30 +156,48 @@ onMounted(async () => {
     entries.value = payload.entries
     if (payload.entries[0]) await selectEntry(payload.entries[0].run_id)
   } catch (error: unknown) {
-    message.error(error instanceof Error ? error.message : 'Benchmark 列表加载失败')
+    const detail = error instanceof Error ? error.message : 'Benchmark 列表加载失败'
+    collectionError.value = detail
+    message.error(detail)
   } finally {
     collectionLoading.value = false
   }
-})
+}
+
+onMounted(loadCollection)
 </script>
 
 <template>
   <main class="benchmark-page">
     <header class="page-header">
       <div class="heading-copy">
-        <span class="eyebrow"><BarChart3 :size="15" /> SAVED AUDITS</span>
-        <h1>Benchmark 审计集</h1>
-        <p>查看已加入 Benchmark 的原始审计结果</p>
+        <span class="eyebrow"><BarChart3 :size="15" /> GREPTILE DATASET</span>
+        <h1>Greptile Benchmark</h1>
+        <p>查看 5 个仓库、10 个评测任务的审计结果与完整回放</p>
       </div>
       <div class="capacity">
         <strong>{{ entries.length }} / {{ capacity }}</strong>
-        <span>仓库名额</span>
+        <span>评测任务</span>
       </div>
     </header>
 
     <section v-if="collectionLoading" class="loading-layout" aria-label="正在加载 Benchmark">
       <NSkeleton height="22rem" :sharp="false" />
       <NSkeleton height="22rem" :sharp="false" />
+    </section>
+
+    <section v-else-if="collectionError" class="empty-state">
+      <NEmpty :description="collectionError">
+        <template #extra>
+          <p>Benchmark 服务尚未就绪，请稍后重试。</p>
+          <NButton secondary @click="loadCollection">
+            <template #icon>
+              <RefreshCw :size="15" />
+            </template>
+            重新加载
+          </NButton>
+        </template>
+      </NEmpty>
     </section>
 
     <section v-else-if="entries.length === 0" class="empty-state">
@@ -182,32 +215,42 @@ onMounted(async () => {
       <aside class="repository-panel">
         <header>
           <div>
-            <h2>已加入仓库</h2>
-            <span>选择一个 PR 查看结果</span>
+            <h2>评测仓库</h2>
+            <span>选择题目查看结果</span>
           </div>
           <NTag size="small" :bordered="false">
             {{ entries.length }}
           </NTag>
         </header>
         <nav aria-label="Benchmark 仓库">
-          <button
-            v-for="entry in entries"
-            :key="entry.run_id"
-            type="button"
-            class="repository-item"
-            :class="{ selected: entry.run_id === selectedRunId }"
-            :aria-pressed="entry.run_id === selectedRunId"
-            @click="selectEntry(entry.run_id)"
+          <section
+            v-for="group in repositoryGroups"
+            :key="group.repository"
+            class="repository-group"
           >
-            <span class="repository-icon"><GitPullRequest :size="17" /></span>
-            <span class="repository-copy">
-              <strong>{{ entry.repository_name }}</strong>
-              <small>{{ entry.repository }} · PR #{{ entry.pr_number }}</small>
-            </span>
-            <NTag :type="statusType(entry.status)" size="small" :bordered="false">
-              {{ statusLabel(entry.status) }}
-            </NTag>
-          </button>
+            <header class="repository-group-header">
+              <strong>{{ group.repositoryName }}</strong>
+              <span>{{ group.cases.length }} 题</span>
+            </header>
+            <button
+              v-for="entry in group.cases"
+              :key="entry.run_id"
+              type="button"
+              class="repository-item"
+              :class="{ selected: entry.run_id === selectedRunId }"
+              :aria-pressed="entry.run_id === selectedRunId"
+              @click="selectEntry(entry.run_id)"
+            >
+              <span class="repository-icon"><GitPullRequest :size="17" /></span>
+              <span class="repository-copy">
+                <strong>{{ entry.name ?? `PR #${entry.pr_number}` }}</strong>
+                <small>PR #{{ entry.pr_number }} · {{ entry.repository }}</small>
+              </span>
+              <NTag :type="statusType(entry.status)" size="small" :bordered="false">
+                {{ statusLabel(entry.status) }}
+              </NTag>
+            </button>
+          </section>
         </nav>
       </aside>
 
@@ -216,15 +259,15 @@ onMounted(async () => {
           <header class="result-header">
             <div>
               <span>{{ selectedEntry.repository }}</span>
-              <h2>{{ selectedEntry.repository_name }} · PR #{{ selectedEntry.pr_number }}</h2>
+              <h2>{{ selectedEntry.name ?? `${selectedEntry.repository_name} · PR #${selectedEntry.pr_number}` }}</h2>
             </div>
             <RouterLink
               :to="`/review/${selectedEntry.run_id}`"
               class="audit-link"
-              aria-label="查看完整审计"
+              aria-label="回放完整审计"
             >
               <ExternalLink :size="15" />
-              查看完整审计
+              回放完整审计
             </RouterLink>
           </header>
 
@@ -422,6 +465,33 @@ onMounted(async () => {
   display: grid;
 }
 
+.repository-group + .repository-group {
+  border-top: 1px solid var(--color-border);
+}
+
+.repository-group-header {
+  align-items: center;
+  background: var(--color-surface-raised);
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
+}
+
+.repository-group-header strong {
+  font-size: 0.7rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository-group-header span {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+
 .repository-item {
   align-items: center;
   background: transparent;
@@ -438,7 +508,7 @@ onMounted(async () => {
   width: 100%;
 }
 
-.repository-item:last-child {
+.repository-group .repository-item:last-child {
   border-bottom: 0;
 }
 
@@ -486,6 +556,7 @@ onMounted(async () => {
 
 .result-header h2 {
   font-size: 1rem;
+  overflow-wrap: anywhere;
 }
 
 .result-header > div {

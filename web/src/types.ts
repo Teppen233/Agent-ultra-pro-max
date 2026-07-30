@@ -117,6 +117,7 @@ export interface DispatchEntry {
 
 export interface RunSummary {
   run_id: string
+  name?: string | null
   status: 'running' | 'done' | 'failed'
   event_count: number
   has_error: boolean
@@ -124,6 +125,7 @@ export interface RunSummary {
 
 export interface RunDetail {
   run_id: string
+  name?: string | null
   events: PipelineEvent[]
   report: string | null
   diff: string | null
@@ -131,6 +133,7 @@ export interface RunDetail {
 
 export interface BenchmarkEntrySummary {
   run_id: string
+  name?: string | null
   repository: string
   repository_name: string
   pr_url: string
