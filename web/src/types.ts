@@ -46,6 +46,7 @@ export interface WorkflowEdge {
 
 export interface Finding {
   id: string
+  source_id?: string
   category: Category
   severity: Severity
   confidence: number

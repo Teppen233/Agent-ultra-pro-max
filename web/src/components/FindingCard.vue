@@ -12,6 +12,16 @@ const confidence = computed(
   () => props.finding.confidence_adjusted ?? props.finding.confidence,
 )
 const rejected = computed(() => props.finding.verdict === 'reject')
+const verdictLabel = computed(() => {
+  if (props.finding.verdict === 'reject') return 'Verifier 已排除'
+  if (props.finding.verdict === 'keep' && confidence.value >= 0.45) return '已确认'
+  return '待人工复核'
+})
+const verdictType = computed(() => {
+  if (props.finding.verdict === 'reject') return 'default'
+  if (props.finding.verdict === 'keep' && confidence.value >= 0.45) return 'success'
+  return 'warning'
+})
 
 const severityType = computed(() => {
   if (props.finding.severity === 'critical') return 'error'
@@ -42,6 +52,7 @@ function toggle() {
       <span class="finding-main">
         <span class="finding-meta">
           <NTag :type="severityType" size="small" :bordered="false">{{ severityLabels[finding.severity] }}</NTag>
+          <NTag :type="verdictType" size="small" :bordered="false">{{ verdictLabel }}</NTag>
           <span>{{ categoryLabels[finding.category] }}</span>
         </span>
         <strong>{{ finding.title }}</strong>
@@ -54,7 +65,7 @@ function toggle() {
             <small>{{ Math.round(confidence * 100) }}</small>
           </span>
         </template>
-        Verifier 调整后置信度
+        Verifier 复核后问题仍成立的置信度
       </NTooltip>
       <ChevronDown v-if="expanded" :size="17" />
       <ChevronRight v-else :size="17" />
@@ -90,11 +101,8 @@ function toggle() {
 }
 
 .finding-card.rejected {
-  opacity: 0.48;
-}
-
-.finding-card.rejected .finding-main strong {
-  text-decoration: line-through;
+  border-style: dashed;
+  opacity: 0.78;
 }
 
 .finding-summary {

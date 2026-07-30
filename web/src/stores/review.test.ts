@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { demoEvents } from '@/demo'
 import { useReviewStore } from '@/stores/review'
+import type { PipelineEvent } from '@/types'
 
 describe('review workflow reducer', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -80,5 +81,50 @@ describe('review workflow reducer', () => {
     expect(store.replayIndex).toBe(3)
     expect(store.replaying).toBe(false)
     vi.useRealTimers()
+  })
+
+  it('keeps legacy findings distinct when a model reused a placeholder ID', () => {
+    const store = useReviewStore()
+    const first = structuredClone(
+      demoEvents.find((event) => event.type === 'finding') as PipelineEvent,
+    )
+    const second = structuredClone(first)
+    if (first.type !== 'finding' || second.type !== 'finding') throw new Error('fixture mismatch')
+    first.finding.id = 'F1'
+    second.finding.id = 'F1'
+    second.finding.title = 'A separate candidate'
+    second.finding.line_start += 20
+    store.consume(first)
+    store.consume(second)
+
+    store.consume({
+      type: 'verdict',
+      timestamp: 3,
+      verdict: {
+        finding_id: 'F1',
+        verdict: 'reject',
+        reason: 'first verdict',
+        confidence_adjusted: 0.1,
+      },
+    })
+    store.consume({
+      type: 'verdict',
+      timestamp: 4,
+      verdict: {
+        finding_id: 'F1',
+        verdict: 'keep',
+        reason: 'second verdict',
+        confidence_adjusted: 0.9,
+      },
+    })
+
+    expect(store.findings).toHaveLength(2)
+    expect(new Set(store.findings.map((item) => item.id)).size).toBe(2)
+    expect(store.findings.find((item) => item.title === first.finding.title)?.verdict_reason).toBe(
+      'first verdict',
+    )
+    expect(store.findings.find((item) => item.title === second.finding.title)?.verdict_reason).toBe(
+      'second verdict',
+    )
   })
 })

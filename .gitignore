@@ -1,4 +1,9 @@
 .env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
@@ -10,6 +15,8 @@ htmlcov/
 runs/
 repos/
 profile/
+rushgogogo/
+result.txt
 benchmark/results/*/
 web/node_modules/
 web/dist/

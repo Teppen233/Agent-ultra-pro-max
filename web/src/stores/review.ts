@@ -86,7 +86,18 @@ export const useReviewStore = defineStore('review', {
     replayTimer: null,
   }),
   getters: {
-    retainedFindings: (state) => state.findings.filter((item) => item.verdict !== 'reject'),
+    retainedFindings: (state) =>
+      state.findings.filter(
+        (item) =>
+          item.verdict === 'keep' && (item.confidence_adjusted ?? item.confidence) >= 0.45,
+      ),
+    needsReviewCount: (state) =>
+      state.findings.filter(
+        (item) =>
+          item.verdict === null ||
+          item.verdict === undefined ||
+          (item.verdict === 'keep' && (item.confidence_adjusted ?? item.confidence) < 0.45),
+      ).length,
     rejectedCount: (state) => state.findings.filter((item) => item.verdict === 'reject').length,
     elapsedSeconds: (state) => {
       const first = state.events[0]?.timestamp
@@ -202,11 +213,38 @@ export const useReviewStore = defineStore('review', {
         })
         this.dispatchLog = this.dispatchLog.slice(0, 24)
       } else if (event.type === 'finding') {
-        const existing = this.findings.findIndex((item) => item.id === event.finding.id)
-        if (existing >= 0) this.findings.splice(existing, 1, event.finding)
-        else this.findings.unshift(event.finding)
+        const sourceId = event.finding.source_id ?? event.finding.id
+        const sameSource = this.findings.filter(
+          (item) => (item.source_id ?? item.id) === sourceId,
+        )
+        const exact = sameSource.findIndex(
+          (item) =>
+            item.file === event.finding.file &&
+            item.line_start === event.finding.line_start &&
+            item.title === event.finding.title,
+        )
+        if (exact >= 0) {
+          const existing = this.findings.indexOf(sameSource[exact] as Finding)
+          this.findings.splice(existing, 1, {
+            ...event.finding,
+            id: this.findings[existing]?.id ?? event.finding.id,
+            source_id: sourceId,
+          })
+        } else {
+          this.findings.unshift({
+            ...event.finding,
+            id: sameSource.length === 0 ? sourceId : `${sourceId}#${sameSource.length + 1}`,
+            source_id: sourceId,
+          })
+        }
       } else if (event.type === 'verdict') {
-        const finding = this.findings.find((item) => item.id === event.verdict.finding_id)
+        const finding = [...this.findings]
+          .reverse()
+          .find(
+            (item) =>
+              (item.source_id ?? item.id) === event.verdict.finding_id &&
+              item.verdict === undefined,
+          )
         if (finding) {
           finding.verdict = event.verdict.verdict
           finding.verdict_reason = event.verdict.reason

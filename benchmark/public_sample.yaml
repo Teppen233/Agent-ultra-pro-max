@@ -1,0 +1,14 @@
+- repo: Netflix/metaflow
+  fork_url: https://github.com/Netflix/metaflow.git
+  pr_url: https://github.com/Netflix/metaflow/pull/3069
+  base_sha: 8e29f779ccba0273f79d252c04264aea23cef89d
+  head_sha: faebdfb84728c3f4282758de2157d04e7e993e00
+  bug_desc: >-
+    The devcontainer decorator mounts the user's entire home directory read-write.
+    Container code can therefore read or modify SSH keys, cloud credentials, browser
+    profiles, and other host secrets, defeating the sandbox boundary.
+  bug_files:
+    - path: metaflow/plugins/devcontainer/devcontainer_decorator.py
+      line_start: 74
+      line_end: 84
+  category: security

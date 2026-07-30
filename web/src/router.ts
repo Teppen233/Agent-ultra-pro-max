@@ -16,6 +16,11 @@ export const router = createRouter({
       component: () => import('@/views/DiffView.vue'),
     },
     {
+      path: '/review/:runId/report',
+      name: 'report',
+      component: () => import('@/views/ReportView.vue'),
+    },
+    {
       path: '/benchmark',
       name: 'benchmark',
       component: () => import('@/views/BenchmarkView.vue'),
