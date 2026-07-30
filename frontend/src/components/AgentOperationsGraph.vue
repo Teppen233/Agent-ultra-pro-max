@@ -1,7 +1,40 @@
+<script lang="ts">
+import type { AgentInstanceState } from '@/contracts'
+
+type AgentWorkInput = Pick<
+  AgentInstanceState,
+  'status' | 'candidateCount' | 'mailboxCount' | 'toolCount' | 'files'
+>
+
+export const presentAgentWork = (agent: AgentWorkInput) => {
+  const visibleFiles = agent.files.slice(0, 2).join('、')
+  const fileSummary = agent.files.length
+    ? `${agent.files.length} 个文件 · ${visibleFiles}${agent.files.length > 2 ? ' 等' : ''}`
+    : '负责范围待分配'
+  let currentAction = '正在读取上下文包'
+  if (agent.status === 'waiting') currentAction = '等待并发槽位'
+  else if (agent.status === 'failed') currentAction = '执行未完成，等待汇总'
+  else if (agent.status === 'degraded') currentAction = '已降级，等待汇总'
+  else if (agent.candidateCount > 0) currentAction = `已提交 ${agent.candidateCount} 个候选，等待 Verifier`
+  else if (agent.status === 'completed') currentAction = '初审完成，暂无候选'
+  else if (agent.mailboxCount > 0) currentAction = '正在处理协作补证'
+  else if (agent.toolCount > 0) currentAction = '正在分析代码差异'
+
+  return {
+    fileSummary,
+    inputSource: 'PR Diff + 上下文包',
+    currentAction,
+    toolSummary: agent.toolCount ? `主动工具 ${agent.toolCount} 次` : '未主动调用',
+    collaborationSummary: agent.mailboxCount ? `协作消息 ${agent.mailboxCount} 条` : '暂无协作消息',
+    candidateSummary: agent.candidateCount ? `已提交 ${agent.candidateCount} 个候选` : '暂无候选',
+  }
+}
+</script>
+
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import type { AgentInstanceState, AgentStatus } from '@/contracts'
+import type { AgentStatus } from '@/contracts'
 import { groupAgentInstances } from '@/stores/review'
 
 const props = defineProps<{
@@ -35,12 +68,20 @@ const statusText: Record<AgentStatus, string> = {
           <article v-for="agent in group.agents" :key="agent.id" class="instance-card" :class="[agent.role, agent.status]">
             <div><strong>{{ agent.label }}</strong><em>{{ statusText[agent.status] }}</em></div>
             <code>{{ agent.id }}</code>
-            <p>{{ agent.files.join('、') || '未提供负责文件' }}</p>
-            <footer>
-              <span><b>{{ agent.toolCount }}</b> 工具</span>
-              <span><b>{{ agent.mailboxCount }}</b> 协作</span>
-              <span><b>{{ agent.candidateCount }}</b> 候选</span>
-            </footer>
+            <div class="instance-action">
+              <small>当前动作</small>
+              <strong>{{ presentAgentWork(agent).currentAction }}</strong>
+            </div>
+            <dl class="instance-work-summary">
+              <div><dt>负责范围</dt><dd>{{ presentAgentWork(agent).fileSummary }}</dd></div>
+              <div><dt>输入来源</dt><dd>{{ presentAgentWork(agent).inputSource }}</dd></div>
+            </dl>
+            <div class="instance-facts">
+              <span>{{ presentAgentWork(agent).toolSummary }}</span>
+              <span>{{ presentAgentWork(agent).collaborationSummary }}</span>
+              <span>{{ presentAgentWork(agent).candidateSummary }}</span>
+            </div>
+            <small class="tool-scope-note">仅统计主动工具 · 系统工具见操作流水线</small>
             <small v-if="agent.warning" class="instance-warning">{{ agent.warning }}</small>
           </article>
         </div>
