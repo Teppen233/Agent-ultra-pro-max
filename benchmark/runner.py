@@ -94,17 +94,39 @@ def run_benchmark(
             config = Config.from_env()
             store = EventStore(config.runs_dir)
             orch = Orchestrator(config, store)
-            # 使用 Fake Model（Benchmark 离线测试场景）
-            from reviewcrew.llm.glm import build_fake_model
-            orch.model = build_fake_model()
 
-            request = ReviewRequest(
-                repo_path="",
-                base_ref=entry.base_sha,
-                head_ref=entry.head_sha,
-            )
-            logger.info("  [live] 启动 Orchestrator 审查: %s", entry.fork_repo)
-            result = asyncio.run(orch.review(request))
+            # 确定 PR URL：优先 source_fix_pr，其次构造 fork_repo PR
+            pr_url = entry.source_fix_pr or ""
+            if not pr_url and entry.fork_repo:
+                # 如果 fork_repo 是 GitHub URL，尝试构造 PR URL
+                pr_url = entry.fork_repo.rstrip("/") + "/pull/1"
+
+            if not pr_url:
+                logger.warning("跳过 %s: 无有效 PR URL", entry.id)
+                continue
+
+            logger.info("  [live] 审查 PR: %s", pr_url)
+            request = ReviewRequest(pr_url=pr_url)
+
+            logger.info("  [live] 审查完成: %s", pr_url)
+            try:
+                result = asyncio.run(orch.review(request))
+            except Exception as e:
+                logger.warning("  [live] 审查异常: %s", e)
+                result = ReviewResult(
+                    run_id=f"bench-{entry.id}",
+                    status="failed",
+                    repository=entry.fork_repo,
+                    base_sha=entry.base_sha or "",
+                    head_sha=entry.head_sha or "",
+                    findings=[],
+                    rejected_count=0,
+                    coverage=[],
+                    warnings=[f"审查失败: {e}"],
+                    started_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(timezone.utc),
+                    elapsed_seconds=0,
+                )
         else:
             # Fake 模式：生成模拟结果（不调用任何外部服务）
             logger.info("  [fake] 生成模拟 ReviewResult（无实际审查）")
