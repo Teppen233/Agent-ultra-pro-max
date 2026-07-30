@@ -13,8 +13,8 @@ GITHUB_PR = re.compile(
 GITHUB_REMOTE = re.compile(r"github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?$")
 URL_CREDENTIALS = re.compile(r"(https?://)[^/@\s]+@")
 GIT_COMMAND_TIMEOUT_SECONDS = 30
-GIT_PULL_TIMEOUT_SECONDS = 300
-GIT_CLONE_TIMEOUT_SECONDS = 900
+GIT_PULL_TIMEOUT_SECONDS: int | None = None
+GIT_CLONE_TIMEOUT_SECONDS: int | None = None
 
 _LOCKS_GUARD = threading.Lock()
 _REPOSITORY_LOCKS: dict[Path, threading.Lock] = {}
@@ -45,14 +45,12 @@ def _sanitize_git_output(value: str) -> str:
 def _run_git(
     arguments: list[str],
     action: str,
-    timeout: int = GIT_COMMAND_TIMEOUT_SECONDS,
+    timeout: int | None = GIT_COMMAND_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
     command = ["git", *arguments]
     environment = {
         **os.environ,
         "GIT_TERMINAL_PROMPT": "0",
-        "GIT_HTTP_LOW_SPEED_LIMIT": "1",
-        "GIT_HTTP_LOW_SPEED_TIME": "60",
     }
     try:
         result = subprocess.run(
