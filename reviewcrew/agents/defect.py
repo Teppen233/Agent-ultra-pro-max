@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -105,42 +106,37 @@ class DefectAgent(AgentRuntime):
         return self._parse_findings(response, pack)
 
     def _build_prompt(self, pack: ContextPack, pr_data: Any = None) -> str:
-        """构建审查 prompt。"""
+        """构建审查 prompt（限制总长度 < 8000 字符）。"""
         parts: list[str] = []
+        limit = 8000
 
         # PR 概述
         if pack.pr_title:
-            parts.append(f"## PR 标题\n{pack.pr_title}")
+            parts.append(f"## PR 标题\n{pack.pr_title[:200]}")
         if pack.pr_description:
-            parts.append(f"## PR 描述\n{pack.pr_description}")
+            parts.append(f"## PR 描述\n{pack.pr_description[:500]}")
 
         # 文件列表
-        parts.append(f"## 变更文件\n{chr(10).join('- ' + f for f in pack.files)}")
+        files_str = ", ".join(pack.files[:10])
+        parts.append(f"## 变更文件\n{files_str}")
 
-        # Diff hunks
-        parts.append("## Diff 变更")
-        for hunk in pack.diff_hunks:
-            parts.append(f"### {hunk.file} (行 {hunk.new_start}-{hunk.new_start + hunk.new_count})")
-            parts.append(f"```\n{hunk.content}\n```")
+        # Diff hunks（截断）
+        hunk_parts = ["## Diff 变更"]
+        for hunk in pack.diff_hunks[:5]:  # 最多 5 个 hunk
+            content = hunk.content[:1500]  # 每个 hunk 最多 1500 字符
+            hunk_parts.append(f"### {hunk.file} (+{hunk.new_start})")
+            hunk_parts.append(f"```\n{content}\n```")
+        parts.append("\n".join(hunk_parts))
 
-        # 封闭代码（更大上下文）
-        if pack.enclosing_code:
-            parts.append("## 变更代码上下文")
-            for ev in pack.enclosing_code:
-                parts.append(f"### {ev.file}:{ev.line_start}-{ev.line_end}")
-                parts.append(f"```{ev.language or ''}\n{ev.content}\n```")
+        # 总长度检查
+        full = "\n\n".join(parts)
+        if len(full) > limit:
+            full = full[:limit] + "\n... (内容已截断)"
 
-        # 相关文件
-        if pack.related_code:
-            parts.append("## 同目录相关代码")
-            for ev in pack.related_code[:3]:  # 限制 3 个
-                parts.append(f"### {ev.file}:{ev.line_start}-{ev.line_end}")
-                parts.append(f"```{ev.language or ''}\n{ev.content[:2000]}\n```")
-
-        return "\n\n".join(parts)
+        return full
 
     async def _call_llm(self, user_prompt: str) -> str:
-        """调用 LLM API 并返回原始响应文本。"""
+        """调用 LLM API 并返回原始响应文本，失败时重试 2 次。"""
         if not hasattr(self, '_config'):
             from ..config import Config
             self._config = Config.from_env()
@@ -162,20 +158,28 @@ class DefectAgent(AgentRuntime):
             "max_tokens": 4096,
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        last_error = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    resp = await client.post(
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    return data["choices"][0]["message"]["content"]
+            except Exception as e:
+                last_error = e
+                logger.warning("DefectAgent LLM 调用失败 (attempt %d/3): %s", attempt + 1, e)
+                if attempt < 2:
+                    await asyncio.sleep(2)
 
-        content = data["choices"][0]["message"]["content"]
-        return content
+        raise RuntimeError(f"LLM 调用失败 (3 attempts): {last_error}")
 
     def _parse_findings(self, response: str, pack: ContextPack) -> list[Finding]:
         """从 LLM 响应中解析 Finding 列表，支持混合文本。"""

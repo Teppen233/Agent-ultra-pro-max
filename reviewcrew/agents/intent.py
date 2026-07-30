@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -104,38 +105,33 @@ class IntentAgent(AgentRuntime):
         return self._parse_findings(response, pack)
 
     def _build_prompt(self, pack: ContextPack, pr_data: Any = None) -> str:
-        """构建意图审查 prompt。"""
+        """构建意图审查 prompt（限制总长度 < 8000 字符）。"""
         parts: list[str] = []
+        limit = 8000
 
-        # PR 概述 — 这是意图分析的核心输入
-        parts.append("## 审查任务")
-        parts.append("请分析以下 PR 的代码变更，判断是否存在："
-                     "业务逻辑错误、边界条件遗漏、接口兼容性问题、意图-实现不一致。")
+        parts.append("## 审查任务\n分析以下 PR 是否存在逻辑错误、行为变更不一致、null 检查遗漏。")
         if pack.pr_title:
-            parts.append(f"\n**PR 标题（开发者意图）**: {pack.pr_title}")
+            parts.append(f"**PR 标题**: {pack.pr_title[:200]}")
         if pack.pr_description:
-            parts.append(f"\n**PR 描述**: {pack.pr_description}")
+            parts.append(f"**PR 描述**: {pack.pr_description[:500]}")
 
-        # 文件列表
-        parts.append(f"\n## 变更文件\n{chr(10).join('- ' + f for f in pack.files)}")
+        parts.append(f"## 变更文件\n{', '.join(pack.files[:10])}")
 
-        # Diff hunks
-        parts.append("## Diff 变更")
-        for hunk in pack.diff_hunks:
-            parts.append(f"### {hunk.file} (行 {hunk.new_start}-{hunk.new_start + hunk.new_count})")
-            parts.append(f"```\n{hunk.content}\n```")
+        # Diff hunks（截断）
+        hunk_parts = ["## Diff 变更"]
+        for hunk in pack.diff_hunks[:5]:
+            content = hunk.content[:1500]
+            hunk_parts.append(f"### {hunk.file} (+{hunk.new_start})")
+            hunk_parts.append(f"```\n{content}\n```")
+        parts.append("\n".join(hunk_parts))
 
-        # 封闭代码
-        if pack.enclosing_code:
-            parts.append("## 变更代码上下文")
-            for ev in pack.enclosing_code:
-                parts.append(f"### {ev.file}:{ev.line_start}-{ev.line_end}")
-                parts.append(f"```{ev.language or ''}\n{ev.content}\n```")
-
-        return "\n\n".join(parts)
+        full = "\n\n".join(parts)
+        if len(full) > limit:
+            full = full[:limit] + "\n... (已截断)"
+        return full
 
     async def _call_llm(self, user_prompt: str) -> str:
-        """调用 LLM API。"""
+        """调用 LLM API，失败重试 2 次。"""
         if not hasattr(self, '_config'):
             from ..config import Config
             self._config = Config.from_env()
@@ -157,19 +153,23 @@ class IntentAgent(AgentRuntime):
             "max_tokens": 4096,
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        last_error = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    resp = await client.post(url, headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    }, json=payload)
+                    resp.raise_for_status()
+                    return resp.json()["choices"][0]["message"]["content"]
+            except Exception as e:
+                last_error = e
+                logger.warning("IntentAgent LLM 失败 (attempt %d/3): %s", attempt + 1, e)
+                if attempt < 2:
+                    await asyncio.sleep(2)
 
-        return data["choices"][0]["message"]["content"]
+        raise RuntimeError(f"LLM 调用失败: {last_error}")
 
     def _parse_findings(self, response: str, pack: ContextPack) -> list[Finding]:
         """从 LLM 响应中解析 Finding 列表。"""
