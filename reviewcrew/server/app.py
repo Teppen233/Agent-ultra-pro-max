@@ -441,7 +441,7 @@ async def _live_events(
 def _read_latest_benchmark(root: Path) -> dict[str, Any] | None:
     """从固定评测目录或时间戳子目录返回最近的 JSON 摘要。"""
 
-    if not root.is_dir() or root.is_symlink():
+    if not root.is_dir() or _is_link_like(root):
         return None
     direct_summary = root / "summary.json"
     nested_summaries = (
@@ -464,6 +464,7 @@ def _read_latest_benchmark(root: Path) -> dict[str, Any] | None:
         except (OSError, ValueError):
             continue
         if isinstance(payload, dict):
+            payload.setdefault("repositories", [])
             return sanitize_persisted_value(payload)
     return None
 

@@ -13,6 +13,9 @@ import yaml
 CaseStatus = Literal["needs_review", "ready", "unavailable"]
 SourceKind = Literal["public_case", "offline_fixture"]
 BenchmarkSeverity = Literal["critical", "high", "medium", "low"]
+RepositoryBenchmarkStatus = Literal[
+    "needs_data", "pending", "running", "completed", "partial", "failed"
+]
 
 
 class BugLocation(BaseModel):
@@ -129,7 +132,43 @@ class CaseReport(BaseModel):
     status: Literal["completed", "partial", "failed"]
     elapsed_seconds: float = Field(ge=0.0)
     timed_out: bool = False
+    run_id: str | None = None
     judge: JudgeResult
+
+
+class RepositoryBenchmarkTarget(BaseModel):
+    """五仓评测矩阵中一个固定、可展示的仓库目标。"""
+
+    repository: str = Field(min_length=1)
+    language: str = Field(min_length=1)
+
+
+FIVE_REPOSITORIES: tuple[RepositoryBenchmarkTarget, ...] = (
+    RepositoryBenchmarkTarget(repository="sentry", language="Python"),
+    RepositoryBenchmarkTarget(repository="calcom", language="TypeScript"),
+    RepositoryBenchmarkTarget(repository="grafana", language="Go"),
+    RepositoryBenchmarkTarget(repository="keycloak", language="Java"),
+    RepositoryBenchmarkTarget(repository="discourse", language="Ruby"),
+)
+
+
+class RepositoryBenchmarkSummary(BaseModel):
+    """一个仓库的可持久化 Benchmark 汇总，不把离线结果伪装成真实成绩。"""
+
+    repository: str = Field(min_length=1)
+    language: str = Field(min_length=1)
+    total_cases: int = Field(ge=0)
+    verified_cases: int = Field(ge=0)
+    executed_cases: int = Field(ge=0)
+    target_caught: int = Field(ge=0)
+    other_findings: int = Field(ge=0)
+    rejected_count: int = Field(ge=0)
+    elapsed_seconds: float = Field(ge=0.0)
+    status: RepositoryBenchmarkStatus
+    latest_run_id: str | None = None
+    catch_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    observed_offline_catch_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    cases: list[CaseReport] = Field(default_factory=list)
 
 
 class BenchmarkSummary(BaseModel):
@@ -151,6 +190,7 @@ class BenchmarkSummary(BaseModel):
     needs_human_review_cases: int = Field(ge=0)
     timed_out_cases: int = Field(ge=0)
     elapsed_seconds: float = Field(ge=0.0)
+    repositories: list[RepositoryBenchmarkSummary] = Field(default_factory=list)
 
 
 def load_dataset(path: Path, ready_only: bool = True) -> list[DatasetEntry]:

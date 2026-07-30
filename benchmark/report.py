@@ -5,7 +5,115 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from benchmark.models import BenchmarkSummary, CaseReport
+from collections.abc import Sequence
+from typing import Literal
+
+from benchmark.models import (
+    BenchmarkSummary,
+    CaseReport,
+    FIVE_REPOSITORIES,
+    RepositoryBenchmarkSummary,
+    RepositoryBenchmarkTarget,
+    RepositoryBenchmarkStatus,
+)
+
+
+def summarize_reports(
+    reports: Sequence[CaseReport],
+    *,
+    all_repositories: Sequence[RepositoryBenchmarkTarget] = FIVE_REPOSITORIES,
+    mode: Literal["quick", "case", "full"] = "full",
+    runner: Literal["fake", "real"] = "real",
+    offline: bool = False,
+) -> BenchmarkSummary:
+    """按固定仓库聚合案例报告，真实未完成案例不产生伪造的零命中率。"""
+
+    grouped: dict[str, list[CaseReport]] = {}
+    for report in reports:
+        grouped.setdefault(report.project, []).append(report)
+
+    targets = list(all_repositories)
+    known_repositories = {target.repository for target in targets}
+    for repository, repository_reports in grouped.items():
+        if repository not in known_repositories:
+            targets.append(
+                RepositoryBenchmarkTarget(
+                    repository=repository,
+                    language=repository_reports[0].language,
+                )
+            )
+
+    repositories = [
+        _summarize_repository(
+            target,
+            grouped.get(target.repository, []),
+            offline=offline,
+        )
+        for target in targets
+    ]
+    completed = [report for report in reports if report.status == "completed"]
+    caught_cases = sum(report.judge.caught for report in completed)
+    actually_run = len(completed)
+    return BenchmarkSummary(
+        mode=mode,
+        runner=runner,
+        offline=offline,
+        selected_cases=len(reports),
+        completed_cases=actually_run,
+        actually_run_ready_cases=actually_run,
+        caught_cases=caught_cases,
+        real_catch_rate=(caught_cases / actually_run if not offline and actually_run else None),
+        observed_offline_catch_rate=(caught_cases / actually_run if offline and actually_run else None),
+        offline_results_excluded_from_real_rate=offline,
+        false_positive_count=sum(report.judge.false_positive_count for report in reports),
+        verifier_accepted_count=sum(report.judge.verifier_accepted_count for report in reports),
+        verifier_rejected_count=sum(report.judge.verifier_rejected_count for report in reports),
+        needs_human_review_cases=sum(report.judge.needs_human_review for report in reports),
+        timed_out_cases=sum(report.timed_out for report in reports),
+        elapsed_seconds=sum(report.elapsed_seconds for report in reports),
+        repositories=repositories,
+    )
+
+
+def _summarize_repository(
+    target: RepositoryBenchmarkTarget,
+    reports: Sequence[CaseReport],
+    *,
+    offline: bool,
+) -> RepositoryBenchmarkSummary:
+    """聚合单仓案例，并将不完整执行与真实命中率分母隔离。"""
+
+    completed = [report for report in reports if report.status == "completed"]
+    status: RepositoryBenchmarkStatus
+    if not reports:
+        status = "pending"
+    elif any(report.status == "partial" for report in reports):
+        status = "partial"
+    elif all(report.status == "failed" for report in reports):
+        status = "failed"
+    elif all(report.status == "completed" for report in reports):
+        status = "completed"
+    else:
+        status = "partial"
+    target_caught = sum(report.judge.caught for report in completed)
+    completed_count = len(completed)
+    observed_rate = target_caught / completed_count if offline and completed_count else None
+    return RepositoryBenchmarkSummary(
+        repository=target.repository,
+        language=target.language,
+        total_cases=len(reports),
+        verified_cases=sum(report.status in {"completed", "partial"} for report in reports),
+        executed_cases=len(reports),
+        target_caught=target_caught,
+        other_findings=sum(report.judge.false_positive_count for report in reports),
+        rejected_count=sum(report.judge.verifier_rejected_count for report in reports),
+        elapsed_seconds=sum(report.elapsed_seconds for report in reports),
+        status=status,
+        latest_run_id=next((report.run_id for report in reversed(reports) if report.run_id), None),
+        catch_rate=(target_caught / completed_count if not offline and completed_count else None),
+        observed_offline_catch_rate=observed_rate,
+        cases=list(reports),
+    )
 
 
 def render_summary_markdown(summary: BenchmarkSummary, cases: list[CaseReport]) -> str:
@@ -56,6 +164,27 @@ def render_summary_markdown(summary: BenchmarkSummary, cases: list[CaseReport]) 
             f"{'是' if case.judge.caught else '否'} | {case.judge.false_positive_count} | "
             f"{case.judge.reason} |"
         )
+    if summary.repositories:
+        lines.extend(
+            [
+                "",
+                "## 仓库汇总",
+                "",
+                "| 仓库 | 状态 | 已运行 | 目标命中 | 其他 Finding | 拒绝 | 真实命中率 |",
+                "|---|---|---:|---:|---:|---:|---|",
+            ]
+        )
+        for repository in summary.repositories:
+            catch_rate = (
+                "不适用"
+                if repository.catch_rate is None
+                else f"{repository.catch_rate:.2%}"
+            )
+            lines.append(
+                f"| {repository.repository} | {repository.status} | "
+                f"{repository.executed_cases} | {repository.target_caught} | "
+                f"{repository.other_findings} | {repository.rejected_count} | {catch_rate} |"
+            )
     return "\n".join(lines) + "\n"
 
 

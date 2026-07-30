@@ -18,8 +18,15 @@ from reviewcrew.pipeline.orchestrator import Orchestrator
 from reviewcrew.schemas import CodeEvidence, Finding, ReviewRequest, ReviewResult
 
 from benchmark.judge import judge_case
-from benchmark.models import BenchmarkSummary, CaseReport, DatasetEntry, JudgeResult, load_dataset
-from benchmark.report import persist_benchmark_report
+from benchmark.models import (
+    FIVE_REPOSITORIES,
+    BenchmarkSummary,
+    CaseReport,
+    DatasetEntry,
+    JudgeResult,
+    load_dataset,
+)
+from benchmark.report import persist_benchmark_report, summarize_reports
 
 
 Mode = Literal["quick", "case", "full"]
@@ -217,6 +224,7 @@ def execute_benchmark(
                     status="failed",
                     elapsed_seconds=elapsed_seconds,
                     timed_out=True,
+                    run_id=None,
                     judge=JudgeResult(
                         caught=False,
                         needs_human_review=True,
@@ -238,6 +246,7 @@ def execute_benchmark(
                     status="failed",
                     elapsed_seconds=elapsed_seconds,
                     timed_out=False,
+                    run_id=None,
                     judge=JudgeResult(
                         caught=False,
                         needs_human_review=True,
@@ -259,31 +268,16 @@ def execute_benchmark(
                 status=result.status,
                 elapsed_seconds=result.elapsed_seconds,
                 timed_out=timed_out,
+                run_id=result.run_id,
                 judge=decision,
             )
         )
-    completed = [report for report in reports if report.status == "completed"]
-    caught_cases = sum(report.judge.caught for report in completed)
-    actually_run = len(completed)
-    offline_observed = caught_cases / actually_run if backend.offline and actually_run else None
-    real_rate = caught_cases / actually_run if not backend.offline and actually_run else None
-    summary = BenchmarkSummary(
+    summary = summarize_reports(
+        reports,
         mode=mode,
         runner=backend.name,
         offline=backend.offline,
-        selected_cases=len(selected),
-        completed_cases=actually_run,
-        actually_run_ready_cases=actually_run,
-        caught_cases=caught_cases,
-        real_catch_rate=real_rate,
-        observed_offline_catch_rate=offline_observed,
-        offline_results_excluded_from_real_rate=backend.offline,
-        false_positive_count=sum(report.judge.false_positive_count for report in reports),
-        verifier_accepted_count=sum(report.judge.verifier_accepted_count for report in reports),
-        verifier_rejected_count=sum(report.judge.verifier_rejected_count for report in reports),
-        needs_human_review_cases=sum(report.judge.needs_human_review for report in reports),
-        timed_out_cases=sum(report.timed_out for report in reports),
-        elapsed_seconds=sum(report.elapsed_seconds for report in reports),
+        all_repositories=FIVE_REPOSITORIES,
     )
     persist_benchmark_report(output_dir, reports, summary)
     return summary

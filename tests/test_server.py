@@ -316,9 +316,89 @@ def test_report_runs_and_latest_benchmark_are_read_from_safe_fixed_directories(
     assert json_report.json()["run_id"] == run_id
     assert markdown_report.text == "# 已脱敏报告\n"
     assert runs.json()["runs"][0]["run_id"] == run_id
-    assert benchmark.json() == {"executed": 5}
+    assert benchmark.json() == {"executed": 5, "repositories": []}
     assert traversal.status_code == 404
     assert "未找到" in traversal.json()["detail"]
+
+
+def test_latest_benchmark_returns_persisted_repository_contract(tmp_path: Path) -> None:
+    """逐仓持久化字段经 API 返回时保留 Fake 与真实命中率的隔离。"""
+
+    benchmark_dir = tmp_path / "benchmark" / "results"
+    benchmark_dir.mkdir(parents=True)
+    persisted = {
+        "mode": "quick",
+        "runner": "fake",
+        "offline": True,
+        "selected_cases": 1,
+        "completed_cases": 1,
+        "actually_run_ready_cases": 1,
+        "caught_cases": 1,
+        "real_catch_rate": None,
+        "observed_offline_catch_rate": 1.0,
+        "offline_results_excluded_from_real_rate": True,
+        "false_positive_count": 0,
+        "verifier_accepted_count": 1,
+        "verifier_rejected_count": 0,
+        "needs_human_review_cases": 0,
+        "timed_out_cases": 0,
+        "elapsed_seconds": 0.01,
+        "repositories": [
+            {
+                "repository": "sentry",
+                "language": "Python",
+                "total_cases": 1,
+                "verified_cases": 1,
+                "executed_cases": 1,
+                "target_caught": 1,
+                "other_findings": 0,
+                "rejected_count": 0,
+                "elapsed_seconds": 0.01,
+                "status": "completed",
+                "latest_run_id": "fake-sentry-offline-01",
+                "catch_rate": None,
+                "observed_offline_catch_rate": 1.0,
+                "cases": [
+                    {
+                        "case_id": "sentry-offline-01",
+                        "project": "sentry",
+                        "language": "Python",
+                        "status": "completed",
+                        "elapsed_seconds": 0.01,
+                        "timed_out": False,
+                        "run_id": "fake-sentry-offline-01",
+                        "judge": {
+                            "caught": True,
+                            "reason": "离线验证命中。",
+                            "false_positive_count": 0,
+                            "verifier_accepted_count": 1,
+                            "verifier_rejected_count": 0,
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    (benchmark_dir / "summary.json").write_text(
+        json.dumps(persisted, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    app = create_app(
+        config=Config(runs_dir=tmp_path / "runs"),
+        benchmark_results_dir=benchmark_dir,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/benchmarks/latest")
+
+    assert response.status_code == 200
+    repository = response.json()["repositories"][0]
+    assert repository["repository"] == "sentry"
+    assert repository["status"] == "completed"
+    assert repository["latest_run_id"] == "fake-sentry-offline-01"
+    assert repository["catch_rate"] is None
+    assert repository["observed_offline_catch_rate"] == 1.0
+    assert repository["cases"][0]["run_id"] == "fake-sentry-offline-01"
 
 
 def test_absent_report_and_benchmark_return_chinese_404(tmp_path: Path) -> None:
@@ -383,6 +463,38 @@ def test_run_and_benchmark_junctions_cannot_escape_fixed_roots(tmp_path: Path) -
         benchmark_junction.rmdir()
 
     assert report.status_code == 404
+    assert benchmark.status_code == 404
+
+
+@pytest.mark.skipif(os.name != "nt", reason="NTFS Junction 是 Windows 专项边界")
+def test_benchmark_root_junction_cannot_escape_fixed_results_directory(tmp_path: Path) -> None:
+    """评测根目录本身是 Junction 时也必须拒绝外部摘要。"""
+
+    configured_parent = tmp_path / "configured"
+    configured_parent.mkdir()
+    outside_benchmark = tmp_path / "outside-benchmark"
+    outside_benchmark.mkdir()
+    (outside_benchmark / "summary.json").write_text('{"secret": true}', encoding="utf-8")
+    benchmark_root_junction = configured_parent / "results"
+    created = subprocess.run(
+        ["cmd.exe", "/d", "/c", "mklink", "/J", str(benchmark_root_junction), str(outside_benchmark)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if created.returncode != 0:
+        pytest.skip("当前环境不允许创建 NTFS Junction")
+
+    app = create_app(
+        config=Config(runs_dir=tmp_path / "runs"),
+        benchmark_results_dir=benchmark_root_junction,
+    )
+    try:
+        with TestClient(app) as client:
+            benchmark = client.get("/api/benchmarks/latest")
+    finally:
+        benchmark_root_junction.rmdir()
+
     assert benchmark.status_code == 404
 
 

@@ -25,6 +25,80 @@ def load_fake_entries():
     )
 
 
+def test_summary_groups_cases_by_repository_without_inventing_zero_rates() -> None:
+    """真实仓库未运行时保持空命中率，不能伪造成零命中。"""
+
+    models, runner = benchmark_modules()
+    sentry_partial = models.CaseReport(
+        case_id="sentry-public-01",
+        project="sentry",
+        language="Python",
+        status="partial",
+        elapsed_seconds=319.87,
+        timed_out=True,
+        judge=models.JudgeResult(
+            caught=False,
+            reason="达到全局时限，保留当前结果。",
+            false_positive_count=4,
+            verifier_accepted_count=0,
+            verifier_rejected_count=2,
+        ),
+    )
+
+    summary = runner.summarize_reports(
+        [sentry_partial],
+        all_repositories=runner.FIVE_REPOSITORIES,
+    )
+    sentry = next(item for item in summary.repositories if item.repository == "sentry")
+    calcom = next(item for item in summary.repositories if item.repository == "calcom")
+
+    assert sentry.status == "partial"
+    assert sentry.target_caught == 0
+    assert sentry.other_findings == 4
+    assert sentry.rejected_count == 2
+    assert sentry.elapsed_seconds == 319.87
+    assert calcom.status == "pending"
+    assert calcom.catch_rate is None
+
+
+def test_summary_marks_completed_and_failed_repository_cases_as_partial() -> None:
+    """全部案例已经收集时，混合成功和失败不能错误显示为运行中。"""
+
+    models, runner = benchmark_modules()
+    completed = models.CaseReport(
+        case_id="sentry-public-01",
+        project="sentry",
+        language="Python",
+        status="completed",
+        elapsed_seconds=10.0,
+        judge=models.JudgeResult(
+            caught=True,
+            reason="已命中目标。",
+            false_positive_count=0,
+            verifier_accepted_count=1,
+            verifier_rejected_count=0,
+        ),
+    )
+    failed = completed.model_copy(
+        update={
+            "case_id": "sentry-public-02",
+            "status": "failed",
+            "judge": completed.judge.model_copy(
+                update={"caught": False, "reason": "执行失败，保留已完成案例。"}
+            ),
+        }
+    )
+
+    summary = runner.summarize_reports(
+        [completed, failed],
+        all_repositories=runner.FIVE_REPOSITORIES,
+    )
+    sentry = next(item for item in summary.repositories if item.repository == "sentry")
+
+    assert sentry.status == "partial"
+    assert sentry.catch_rate == 1.0
+
+
 def test_quick_fake_is_offline_and_writes_three_auditable_outputs(
     tmp_path: Path,
     monkeypatch,
