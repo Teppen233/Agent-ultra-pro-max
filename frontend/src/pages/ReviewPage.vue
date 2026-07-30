@@ -2,67 +2,90 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
-import { createEventSubscription, replayEventLog } from '@/api/client'
+import { replayEventLog } from '@/api/client'
 import AgentTeamGraph from '@/components/AgentTeamGraph.vue'
 import BudgetMeter from '@/components/BudgetMeter.vue'
 import FindingCard from '@/components/FindingCard.vue'
 import StageProgress from '@/components/StageProgress.vue'
 import Timeline from '@/components/Timeline.vue'
 import demoEvents from '@/fixtures/demo-events.jsonl?raw'
-import { useReviewStore } from '@/stores/review'
+import { createIsolatedReviewStore, useReviewStore } from '@/stores/review'
+import { createServerReplaySubscription, useRunsStore } from '@/stores/runs'
 
 const route = useRoute()
-const store = useReviewStore()
-const connection = ref<'connecting' | 'live' | 'reconnecting' | 'replay' | 'closed' | 'error'>('connecting')
-const message = ref('正在建立事件连接…')
-let subscription: { close(): void } | undefined
-const replayController = new AbortController()
-let currentReplayToken = ''
 const runId = computed(() => String(route.params.runId))
 const isDemo = computed(() => route.query.demo === '1')
-const accepted = computed(() => store.candidates.filter((item) => item.verdict === 'accepted'))
-const rejected = computed(() => store.candidates.filter((item) => item.verdict === 'rejected'))
+const isServerReplay = computed(() => route.query.replay === '1')
+const isPlayback = computed(() => isDemo.value || isServerReplay.value)
+const liveStore = useReviewStore()
+const playbackStore = createIsolatedReviewStore()
+const store = computed(() => isPlayback.value ? playbackStore : liveStore)
+const runs = useRunsStore()
+const playbackConnection = ref<'connecting' | 'replay' | 'reconnecting' | 'closed' | 'error'>('connecting')
+const playbackMessage = ref('正在建立回放连接…')
+const replayController = new AbortController()
+let serverReplaySubscription: { close(): void } | undefined
+let currentReplayToken = ''
+const connection = computed(() => isPlayback.value ? playbackConnection.value : runs.connection)
+const message = computed(() => isPlayback.value ? playbackMessage.value : runs.connectionMessage)
+const accepted = computed(() => store.value.candidates.filter((item) => item.verdict === 'accepted'))
+const rejected = computed(() => store.value.candidates.filter((item) => item.verdict === 'rejected'))
 
 onMounted(async () => {
-  if (store.runId && store.runId !== runId.value) store.reset()
   if (isDemo.value) {
+    playbackStore.reset()
     const replayToken = `${runId.value}:${Date.now()}`
     currentReplayToken = replayToken
-    connection.value = 'replay'
-    message.value = '离线回放播放中'
+    playbackConnection.value = 'replay'
+    playbackMessage.value = '离线回放播放中'
     try {
-      await replayEventLog(demoEvents, store.applyEvent, {
+      await replayEventLog(demoEvents, playbackStore.applyEvent, {
         speed: 1.35,
         signal: replayController.signal,
         runToken: replayToken,
         isCurrent: (token) => token === currentReplayToken,
       })
       if (replayController.signal.aborted) return
-      connection.value = 'closed'
-      message.value = '离线回放已完成'
+      playbackConnection.value = 'closed'
+      playbackMessage.value = '离线回放已完成'
     } catch {
       if (replayController.signal.aborted) return
-      connection.value = 'error'
-      message.value = '演示事件文件无法解析'
+      playbackConnection.value = 'error'
+      playbackMessage.value = '演示事件文件无法解析'
     }
     return
   }
-  subscription = createEventSubscription(runId.value, {
-    onEvent: store.applyEvent,
-    onOpen: () => { connection.value = 'live'; message.value = route.query.replay === '1' ? '历史回放已连接' : '实时事件已连接' },
-    onDisconnect: () => { connection.value = 'reconnecting'; message.value = '连接中断，正在自动恢复…' },
-    onError: (detail) => { connection.value = 'error'; message.value = detail },
-    onClosed: (type) => {
-      connection.value = 'closed'
-      message.value = type === 'review.failed' ? '审查已失败，事件连接已关闭' : '审查已完成，事件连接已关闭'
-    },
-  }, route.query.replay === '1' ? { replay: true, speed: 2 } : undefined)
+  if (isServerReplay.value) {
+    playbackStore.reset()
+    serverReplaySubscription = createServerReplaySubscription(runId.value, {
+      onEvent: playbackStore.applyEvent,
+      onOpen: () => {
+        playbackConnection.value = 'replay'
+        playbackMessage.value = '历史回放已连接（2 倍速）'
+      },
+      onDisconnect: () => {
+        playbackConnection.value = 'reconnecting'
+        playbackMessage.value = '回放连接中断，正在自动恢复…'
+      },
+      onError: (detail) => {
+        playbackConnection.value = 'error'
+        playbackMessage.value = detail
+      },
+      onClosed: (type) => {
+        playbackConnection.value = 'closed'
+        playbackMessage.value = type === 'review.failed' ? '历史运行失败，回放已关闭' : '历史回放已完成'
+      },
+    })
+    return
+  }
+  if (liveStore.runId && liveStore.runId !== runId.value) liveStore.reset()
+  runs.startSubscription(runId.value)
 })
 
 onBeforeUnmount(() => {
   currentReplayToken = ''
   replayController.abort()
-  subscription?.close()
+  serverReplaySubscription?.close()
 })
 </script>
 

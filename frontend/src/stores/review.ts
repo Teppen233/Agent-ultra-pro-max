@@ -1,4 +1,5 @@
-import { defineStore } from 'pinia'
+import { createPinia, defineStore, getActivePinia, setActivePinia } from 'pinia'
+import type { Pinia } from 'pinia'
 
 import type {
   AgentRole,
@@ -232,3 +233,10 @@ export const useReviewStore = defineStore('review', {
     },
   },
 })
+
+/** 为离线 Demo 创建独立状态容器，避免后台真实 SSE 写入演示时间线。 */
+export const createIsolatedReviewStore = (applicationPinia: Pinia | undefined = getActivePinia()) => {
+  const store = useReviewStore(createPinia())
+  if (applicationPinia) setActivePinia(applicationPinia)
+  return store
+}

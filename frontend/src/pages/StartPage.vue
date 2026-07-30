@@ -4,9 +4,11 @@ import { useRouter } from 'vue-router'
 
 import { startReview } from '@/api/client'
 import { useReviewStore } from '@/stores/review'
+import { useRunsStore } from '@/stores/runs'
 
 const router = useRouter()
-const store = useReviewStore()
+const review = useReviewStore()
+const runs = useRunsStore()
 const mode = ref<'github' | 'local'>('github')
 const prUrl = ref('https://github.com/acme/payments-api/pull/284')
 const repoPath = ref('D:\\workspace\\payments-api')
@@ -18,12 +20,13 @@ const error = ref('')
 const submit = async (): Promise<void> => {
   loading.value = true
   error.value = ''
-  store.reset()
+  review.reset()
   try {
     const request = mode.value === 'github'
       ? { pr_url: prUrl.value.trim() }
       : { repo_path: repoPath.value.trim(), base_ref: baseRef.value.trim(), head_ref: headRef.value.trim() }
     const result = await startReview(request)
+    runs.startSubscription(result.run_id)
     await router.push({ name: 'review', params: { runId: result.run_id } })
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '无法启动审查，请稍后重试。'
@@ -33,7 +36,6 @@ const submit = async (): Promise<void> => {
 }
 
 const playDemo = async (): Promise<void> => {
-  store.reset()
   await router.push({ name: 'review', params: { runId: 'demo-security-20260730' }, query: { demo: '1' } })
 }
 </script>

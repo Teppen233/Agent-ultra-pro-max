@@ -1,7 +1,14 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 
+import ActiveRunBar from '@/components/ActiveRunBar.vue'
+import { useRunsStore } from '@/stores/runs'
+
 const route = useRoute()
+const runs = useRunsStore()
+
+onMounted(() => runs.restoreSubscription())
 </script>
 
 <template>
@@ -20,6 +27,7 @@ const route = useRoute()
       </nav>
       <div class="system-status"><span /> 系统就绪</div>
     </header>
+    <ActiveRunBar />
     <main>
       <RouterView />
     </main>
