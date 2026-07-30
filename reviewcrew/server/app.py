@@ -22,6 +22,11 @@ from reviewcrew.server.replay import (
     replay_events,
     tail_events_file,
 )
+from reviewcrew.server.benchmark import (
+    BenchmarkConflict,
+    BenchmarkInputError,
+    BenchmarkStore,
+)
 from reviewcrew.server.repository import prepare_repository
 
 RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -30,6 +35,7 @@ RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 class ReviewRequest(BaseModel):
     pr_url: str = Field(min_length=1)
     repo_path: str | None = None
+    add_to_benchmark: bool = False
 
 
 def create_app(
@@ -47,6 +53,8 @@ def create_app(
     application.state.runs_dir = runs_dir
     application.state.tasks = set()
     application.state.active_run_ids = set()
+    benchmark_store = BenchmarkStore(benchmark_results_dir / "selected.json", runs_dir)
+    application.state.benchmark_store = benchmark_store
 
     def run_path(run_id: str) -> Path:
         if not RUN_ID.fullmatch(run_id):
@@ -96,6 +104,13 @@ def create_app(
     @application.post("/api/review", status_code=202)
     async def start_review(request: ReviewRequest) -> dict[str, str]:
         run_id = uuid.uuid4().hex[:12]
+        if request.add_to_benchmark:
+            try:
+                benchmark_store.reserve(run_id, request.pr_url)
+            except BenchmarkConflict as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            except BenchmarkInputError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
         logger = EventLogger(run_id, runs_dir)
         automatic_checkout = not request.repo_path or not request.repo_path.strip()
         logger.emit(
@@ -138,10 +153,18 @@ def create_app(
                     )
                 )
                 await Orchestrator(runs_dir=runs_dir).review(request.pr_url, repo, run_id=run_id)
+                if request.add_to_benchmark:
+                    if not run_path(run_id).joinpath("report.md").exists():
+                        raise RuntimeError("审计未生成报告，无法加入 Benchmark。")
+                    benchmark_store.mark_ready(run_id)
             except Exception as error:
+                if request.add_to_benchmark:
+                    benchmark_store.remove(run_id)
                 record_run_error(run_id, error)
 
         application.state.active_run_ids.add(run_id)
+        if request.add_to_benchmark:
+            benchmark_store.mark_running(run_id)
         task = asyncio.create_task(execute())
         application.state.tasks.add(task)
 
@@ -206,6 +229,9 @@ def create_app(
 
     @application.get("/api/runs/{run_id}")
     async def run_detail(run_id: str) -> dict[str, object]:
+        return load_run_detail(run_id)
+
+    def load_run_detail(run_id: str) -> dict[str, object]:
         directory = run_path(run_id)
         if not directory.is_dir():
             raise HTTPException(status_code=404, detail="Run not found")
@@ -227,6 +253,27 @@ def create_app(
             "report": report_path.read_text(encoding="utf-8") if report_path.exists() else None,
             "diff": diff_path.read_text(encoding="utf-8") if diff_path.exists() else None,
         }
+
+    @application.get("/api/benchmark/entries")
+    async def benchmark_entries() -> dict[str, object]:
+        entries = benchmark_store.list_entries(application.state.active_run_ids)
+        return {
+            "capacity": benchmark_store.capacity,
+            "count": len(entries),
+            "entries": [entry.model_dump(mode="json") for entry in entries],
+        }
+
+    @application.get("/api/benchmark/entries/{run_id}")
+    async def benchmark_entry(run_id: str) -> dict[str, object]:
+        entries = benchmark_store.list_entries(application.state.active_run_ids)
+        entry = next((item for item in entries if item.run_id == run_id), None)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="Benchmark 条目不存在")
+        try:
+            detail = load_run_detail(run_id)
+        except HTTPException:
+            raise
+        return {"entry": entry.model_dump(mode="json"), "run": detail}
 
     @application.get("/api/benchmark/latest")
     async def benchmark_latest() -> dict[str, object]:

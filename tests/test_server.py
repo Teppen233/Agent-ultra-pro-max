@@ -13,7 +13,7 @@ from reviewcrew.server.app import create_app
 
 def write_run(runs_dir: Path, run_id: str = "test123") -> None:
     directory = runs_dir / run_id
-    directory.mkdir(parents=True)
+    directory.mkdir(parents=True, exist_ok=True)
     events = [
         PipelineEvent(timestamp=1, type="stage", stage="preprocess", status="start"),
         PipelineEvent(timestamp=3, type="stage", stage="preprocess", status="done"),
@@ -178,6 +178,129 @@ def test_event_json_remains_frontend_contract(tmp_path: Path) -> None:
     payload = json.loads((runs_dir / "test123" / "events.jsonl").read_text().splitlines()[0])
     assert payload["type"] == "stage"
     assert payload["stage"] == "preprocess"
+
+
+def test_benchmark_entries_start_empty(tmp_path: Path) -> None:
+    client = TestClient(create_app(tmp_path / "runs", tmp_path / "benchmark"))
+
+    assert client.get("/api/benchmark/entries").json() == {
+        "capacity": 5,
+        "count": 0,
+        "entries": [],
+    }
+
+
+def test_benchmark_opt_in_requires_github_pull_request(tmp_path: Path) -> None:
+    client = TestClient(create_app(tmp_path / "runs", tmp_path / "benchmark"))
+
+    response = client.post(
+        "/api/review",
+        json={
+            "pr_url": "/tmp/change.diff",
+            "repo_path": "/tmp/repository",
+            "add_to_benchmark": True,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Benchmark 只支持 GitHub PR 地址。"
+
+
+def test_benchmark_entry_returns_original_run_detail(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    write_run(runs_dir, "benchmark123")
+    application = create_app(runs_dir, tmp_path / "benchmark")
+    store = application.state.benchmark_store
+    store.reserve("benchmark123", "https://github.com/acme/widget/pull/17")
+    store.mark_ready("benchmark123")
+
+    client = TestClient(application)
+    collection = client.get("/api/benchmark/entries").json()
+    detail = client.get("/api/benchmark/entries/benchmark123").json()
+
+    assert collection["count"] == 1
+    assert collection["entries"][0]["repository_name"] == "widget"
+    assert collection["entries"][0]["pr_number"] == 17
+    assert detail["entry"] == collection["entries"][0]
+    assert detail["run"]["report"] == "# Done\n"
+    assert len(detail["run"]["events"]) == 3
+
+
+def test_benchmark_opt_in_becomes_ready_after_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runs_dir = tmp_path / "runs"
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    review_finished = threading.Event()
+
+    monkeypatch.setattr(
+        "reviewcrew.server.app.prepare_repository",
+        lambda _pr_url, _repo_path, _repos_dir: repository,
+    )
+
+    async def review(
+        _self: object,
+        _pr_url: str,
+        _repo_path: Path,
+        run_id: str | None = None,
+    ) -> object:
+        assert run_id is not None
+        write_run(runs_dir, run_id)
+        review_finished.set()
+        return object()
+
+    monkeypatch.setattr("reviewcrew.server.app.Orchestrator.review", review)
+
+    with TestClient(create_app(runs_dir, tmp_path / "benchmark")) as client:
+        response = client.post(
+            "/api/review",
+            json={
+                "pr_url": "https://github.com/acme/widget/pull/17",
+                "add_to_benchmark": True,
+            },
+        )
+        assert response.status_code == 202
+        assert review_finished.wait(timeout=1)
+        entries = client.get("/api/benchmark/entries").json()["entries"]
+
+    assert len(entries) == 1
+    assert entries[0]["status"] == "ready"
+    assert entries[0]["completed_at"] is not None
+
+
+def test_benchmark_opt_in_failure_releases_capacity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preparation_failed = threading.Event()
+
+    def prepare(_pr_url: str, _repo_path: str | None, _repos_dir: Path) -> Path:
+        preparation_failed.set()
+        raise RuntimeError("clone failed")
+
+    monkeypatch.setattr("reviewcrew.server.app.prepare_repository", prepare)
+    application = create_app(tmp_path / "runs", tmp_path / "benchmark")
+
+    with TestClient(application) as client:
+        response = client.post(
+            "/api/review",
+            json={
+                "pr_url": "https://github.com/acme/widget/pull/17",
+                "add_to_benchmark": True,
+            },
+        )
+        assert response.status_code == 202
+        assert preparation_failed.wait(timeout=1)
+        run_id = response.json()["run_id"]
+        error_path = tmp_path / "runs" / run_id / "error.json"
+        for _ in range(100):
+            if error_path.exists():
+                break
+            threading.Event().wait(0.01)
+        assert error_path.exists()
+        assert client.get("/api/benchmark/entries").json()["count"] == 0
 
 
 def test_empty_benchmark_result_is_not_reported_as_available(tmp_path: Path) -> None:
