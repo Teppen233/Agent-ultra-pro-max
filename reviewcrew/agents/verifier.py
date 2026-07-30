@@ -88,7 +88,7 @@ class VerifierAgent(AgentRuntime):
                 reason=f"LLM 验证不可用，降级为置信度过滤 (threshold=0.6, actual={finding.confidence:.0%})",
             )
 
-        logger.info("VerifierAgent[%s] %s → %s (confidence: %.0%%)",
+        logger.info("VerifierAgent[%s] %s -> %s (confidence: %.0f%%)",
                      self.agent_id, finding.id, verdict.verdict, verdict.confidence * 100)
         return verdict
 

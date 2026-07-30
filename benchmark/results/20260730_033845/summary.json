@@ -1,0 +1,23 @@
+{
+  "total": 2,
+  "completed": 2,
+  "caught": 0,
+  "catch_rate": "0%",
+  "needs_review": 0,
+  "by_language": {
+    "python": {
+      "total": 1,
+      "caught": 0
+    },
+    "typescript": {
+      "total": 1,
+      "caught": 0
+    }
+  },
+  "by_category": {
+    "logic": {
+      "total": 2,
+      "caught": 0
+    }
+  }
+}

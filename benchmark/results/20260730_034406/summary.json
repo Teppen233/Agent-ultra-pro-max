@@ -1,0 +1,23 @@
+{
+  "total": 2,
+  "completed": 2,
+  "caught": 1,
+  "catch_rate": "50%",
+  "needs_review": 1,
+  "by_language": {
+    "typescript": {
+      "total": 1,
+      "caught": 1
+    },
+    "java": {
+      "total": 1,
+      "caught": 0
+    }
+  },
+  "by_category": {
+    "logic": {
+      "total": 2,
+      "caught": 1
+    }
+  }
+}

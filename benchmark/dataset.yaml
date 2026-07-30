@@ -1,50 +1,50 @@
-# Greptile Benchmark 案例清单（MVP 5 案例）
+# ReviewCrew Benchmark 案例清单
 # 状态: ready | needs_review | unavailable
 
 - id: sentry-01
-  language: python
-  upstream_repo: https://github.com/getsentry/sentry
-  fork_repo: https://github.com/Teppen233/sentry-reviewcrew
-  source_fix_pr: ""
+  language: typescript
+  upstream_repo: https://github.com/cc-c122/AI-PR-Reviewer
+  fork_repo: https://github.com/cc-c122/AI-PR-Reviewer
+  source_fix_pr: "https://github.com/cc-c122/AI-PR-Reviewer/pull/1"
   test_pr: ""
-  base_sha: "abc1234"
-  head_sha: "def5678"
+  base_sha: ""
+  head_sha: ""
   introducing_commit: ""
   fixing_commit: ""
-  title: Sentry 案例 01
-  bug_description: "身份验证绕过漏洞：SSO 回调中未校验 state 参数，攻击者可构造恶意请求劫持其他用户会话"
+  title: "AI-PR-Reviewer: 折扣计算逻辑错误"
+  bug_description: "硬编码API密钥泄露、非空断言可能导致NPE、折扣率叠加逻辑错误（超过1时金额不减反增）"
   severity: high
   category: logic
   bug_locations:
-    - path: src/sentry/utils/auth.py
-      line_start: 45
-      line_end: 60
+    - path: examples/buggy-review-example/order-discount.ts
+      line_start: 23
+      line_end: 48
   status: ready
 
 - id: calcom-01
-  language: typescript
-  upstream_repo: https://github.com/calcom/cal.com
-  fork_repo: https://github.com/Teppen233/calcom-reviewcrew
-  source_fix_pr: ""
+  language: java
+  upstream_repo: https://github.com/ai-code-review-evaluation/keycloak-greptile
+  fork_repo: https://github.com/ai-code-review-evaluation/keycloak-greptile
+  source_fix_pr: "https://github.com/ai-code-review-evaluation/keycloak-greptile/pull/1"
   test_pr: ""
-  base_sha: "abc1234"
-  head_sha: "def5678"
+  base_sha: ""
+  head_sha: ""
   introducing_commit: ""
   fixing_commit: ""
-  title: Cal.com 案例 01
-  bug_description: "预订时间槽竞态条件：并发请求可能导致同一时间槽被重复预订，缺少分布式锁或数据库行级锁保护"
+  title: "Keycloak: Passkey 重新认证修复"
+  bug_description: "重构认证流程时可能遗漏条件判断、Passkeys条件检查逻辑不一致、测试中使用过宽异常捕获"
   severity: high
   category: logic
   bug_locations:
-    - path: packages/core/booking.ts
-      line_start: 120
-      line_end: 135
+    - path: services/src/main/java/org/keycloak/authentication/authenticators/browser/UsernamePasswordForm.java
+      line_start: 110
+      line_end: 165
   status: ready
 
 - id: grafana-01
   language: go
   upstream_repo: https://github.com/grafana/grafana
-  fork_repo: https://github.com/Teppen233/grafana-reviewcrew
+  fork_repo: https://github.com/grafana/grafana
   source_fix_pr: ""
   test_pr: ""
   base_sha: ""
@@ -52,7 +52,7 @@
   introducing_commit: ""
   fixing_commit: ""
   title: Grafana 案例 01
-  bug_description: 待从 Greptile Case Library 确认
+  bug_description: 待从真实 PR 确认
   severity: high
   category: logic
   bug_locations: []
@@ -61,7 +61,7 @@
 - id: keycloak-01
   language: java
   upstream_repo: https://github.com/keycloak/keycloak
-  fork_repo: https://github.com/Teppen233/keycloak-reviewcrew
+  fork_repo: https://github.com/keycloak/keycloak
   source_fix_pr: ""
   test_pr: ""
   base_sha: ""
@@ -69,7 +69,7 @@
   introducing_commit: ""
   fixing_commit: ""
   title: Keycloak 案例 01
-  bug_description: 待从 Greptile Case Library 确认
+  bug_description: 待从真实 PR 确认
   severity: high
   category: logic
   bug_locations: []
@@ -78,7 +78,7 @@
 - id: discourse-01
   language: ruby
   upstream_repo: https://github.com/discourse/discourse
-  fork_repo: https://github.com/Teppen233/discourse-reviewcrew
+  fork_repo: https://github.com/discourse/discourse
   source_fix_pr: ""
   test_pr: ""
   base_sha: ""
@@ -86,7 +86,7 @@
   introducing_commit: ""
   fixing_commit: ""
   title: Discourse 案例 01
-  bug_description: 待从 Greptile Case Library 确认
+  bug_description: 待从真实 PR 确认
   severity: high
   category: logic
   bug_locations: []
