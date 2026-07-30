@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from hashlib import sha1
 from pathlib import Path
 import re
 import shutil
+from typing import TypeVar
 
 from reviewcrew.config import Config
 from reviewcrew.schemas import CodeEvidence, ContextPack, DiffHunk, PRData
@@ -137,8 +139,78 @@ async def build_context(
             static_signals=[signal for signal in signals if signal.file.replace("\\", "/") == changed_file.path],
             retrieval_notes=notes,
         )
-        packs.append(_fit_budget(pack, config.context_character_budget))
-    return packs
+        packs.append(pack)
+    return compact_context_packs(
+        packs,
+        max_packs=config.max_context_packs,
+        character_budget=config.context_character_budget,
+    )
+
+
+def compact_context_packs(
+    packs: list[ContextPack],
+    *,
+    max_packs: int,
+    character_budget: int,
+) -> list[ContextPack]:
+    """按原顺序均衡合并相邻上下文，并在合并后重新应用字符预算。"""
+
+    if not packs:
+        return []
+    target_count = min(len(packs), max_packs)
+    base_size, larger_groups = divmod(len(packs), target_count)
+    compacted: list[ContextPack] = []
+    offset = 0
+    for index in range(target_count):
+        group_size = base_size + (1 if index < larger_groups else 0)
+        group = packs[offset : offset + group_size]
+        offset += group_size
+        compacted.append(_fit_budget(_merge_context_group(group), character_budget))
+    return compacted
+
+
+def _merge_context_group(group: list[ContextPack]) -> ContextPack:
+    """合并一个相邻分组，所有列表字段均按首次出现顺序稳定去重。"""
+
+    first = group[0]
+    if len(group) == 1:
+        return first.model_copy(deep=True)
+    merged_id = f"ctx-{sha1('|'.join(pack.id for pack in group).encode()).hexdigest()[:12]}"
+    return ContextPack(
+        id=merged_id,
+        repository=first.repository,
+        base_sha=first.base_sha,
+        head_sha=first.head_sha,
+        pr_title=first.pr_title,
+        pr_description=first.pr_description,
+        files=_stable_unique(item for pack in group for item in pack.files),
+        diff_hunks=_stable_unique(item for pack in group for item in pack.diff_hunks),
+        enclosing_code=_stable_unique(item for pack in group for item in pack.enclosing_code),
+        related_code=_stable_unique(item for pack in group for item in pack.related_code),
+        related_tests=_stable_unique(item for pack in group for item in pack.related_tests),
+        project_docs=_stable_unique(item for pack in group for item in pack.project_docs),
+        git_history=_stable_unique(item for pack in group for item in pack.git_history),
+        static_signals=_stable_unique(item for pack in group for item in pack.static_signals),
+        retrieval_notes=_stable_unique(item for pack in group for item in pack.retrieval_notes),
+        truncated=any(pack.truncated for pack in group),
+    )
+
+
+_StableItem = TypeVar("_StableItem")
+
+
+def _stable_unique(items: Iterable[_StableItem]) -> list[_StableItem]:
+    """保留首次出现顺序，并支持字符串和 Pydantic 证据模型去重。"""
+
+    selected: list[_StableItem] = []
+    seen: set[str] = set()
+    for item in items:
+        key = item if isinstance(item, str) else item.model_dump_json()
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(item)
+    return selected
 
 
 _DECLARATION_PATTERNS = (

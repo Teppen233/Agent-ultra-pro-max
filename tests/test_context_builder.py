@@ -9,7 +9,7 @@ import reviewcrew.context.builder as context_builder_module
 from reviewcrew.context.builder import build_context
 from reviewcrew.diff.parser import parse_unified_diff
 from reviewcrew.events import EventStore
-from reviewcrew.schemas import PRData
+from reviewcrew.schemas import ChangedFile, DiffHunk, PRData
 from reviewcrew.tool_activity import ToolActivityPublisher
 
 
@@ -34,6 +34,63 @@ index 1111111..2222222 100644
 +  return repository.get(calendarId);
 +}
 """
+
+
+@pytest.mark.asyncio
+async def test_build_context_compacts_nine_files_without_losing_files_or_hunks(
+    tmp_path: Path,
+) -> None:
+    """九个修改文件应稳定压缩为三个相邻分片，并完整保留文件与差异块。"""
+
+    changed_files: list[ChangedFile] = []
+    for index in range(9):
+        path = f"src/module_{index}.py"
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"VALUE_{index} = {index}\n", encoding="utf-8")
+        changed_files.append(
+            ChangedFile(
+                path=path,
+                status="modified",
+                additions=1,
+                hunks=[
+                    DiffHunk(
+                        id=f"hunk-{index}",
+                        file=path,
+                        old_start=1,
+                        old_count=1,
+                        new_start=1,
+                        new_count=1,
+                        changed_lines=[1],
+                        content=f"+VALUE_{index} = {index}",
+                    )
+                ],
+            )
+        )
+    (tmp_path / "README.md").write_text("项目说明。\n", encoding="utf-8")
+    pr = PRData(
+        provider="local",
+        repository="demo",
+        title="批量更新模块",
+        base_sha="base",
+        head_sha="head",
+        files=changed_files,
+        raw_diff="\n".join(hunk.content for item in changed_files for hunk in item.hunks),
+    )
+    config = Config(_env_file=None, context_character_budget=50_000)
+
+    first = await build_context(pr, tmp_path, config, semgrep_available=False)
+    second = await build_context(pr, tmp_path, config, semgrep_available=False)
+
+    assert [pack.files for pack in first] == [
+        ["src/module_0.py", "src/module_1.py", "src/module_2.py"],
+        ["src/module_3.py", "src/module_4.py", "src/module_5.py"],
+        ["src/module_6.py", "src/module_7.py", "src/module_8.py"],
+    ]
+    assert [file for pack in first for file in pack.files] == [item.path for item in changed_files]
+    assert [hunk.id for pack in first for hunk in pack.diff_hunks] == [f"hunk-{index}" for index in range(9)]
+    assert all(len(pack.project_docs) == 1 for pack in first)
+    assert [pack.id for pack in first] == [pack.id for pack in second]
 
 
 @pytest.mark.asyncio
@@ -183,7 +240,7 @@ async def test_build_context_publishes_only_real_reads_searches_and_explicit_sem
     degraded = next(
         event
         for event in events
-        if event.type == "tool.failed" and event.data["tool_name"] == "static.semgrep"
+        if event.type == "tool.degraded" and event.data["tool_name"] == "static.semgrep"
     )
     assert "未安装" in degraded.data["summary"]
 

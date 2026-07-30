@@ -29,6 +29,12 @@ def test_config_defaults_to_eight_concurrent_workers() -> None:
     assert Config(_env_file=None).max_concurrency == 8
 
 
+def test_config_defaults_to_three_context_packs() -> None:
+    """默认最多构建三个审查分片，避免专家实例随文件数无限增长。"""
+
+    assert Config(_env_file=None).max_context_packs == 3
+
+
 def test_config_exposes_bounded_expert_collaboration_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -410,7 +410,7 @@ async def test_github_mode_without_local_repo_emits_only_explicit_context_degrad
 
     events = store.read(run_id)
     assert contexts[0].retrieval_notes == ["GitHub 模式仅使用 PR 差异构建基础上下文。"]
-    assert [event.type for event in events] == ["tool.failed"] * 5
+    assert [event.type for event in events] == ["tool.degraded"] * 5
     assert {
         event.data["tool_name"] for event in events
     } == {
@@ -900,6 +900,53 @@ async def test_plan_shards_and_max_concurrency_control_actual_expert_work(tmp_pa
     assert result.status == "completed"
     assert set(runs) == {("defect", "ctx-0"), ("defect", "ctx-1"), ("defect", "ctx-2"), ("intent", "ctx-3")}
     assert peak <= 2
+
+
+@pytest.mark.asyncio
+async def test_default_github_context_limits_nine_files_to_six_expert_instances(
+    tmp_path: Path,
+) -> None:
+    """九文件 GitHub PR 默认最多产生三分片、六个双角色专家实例。"""
+
+    async def github_loader(request: ReviewRequest, config: Config) -> PRData:
+        return make_pr(file_count=9, changed_lines=1).model_copy(update={"provider": "github"})
+
+    class AllContextsLead:
+        async def plan(
+            self,
+            pr: PRData,
+            contexts: list[ContextPack],
+            budget: Budget,
+        ) -> ReviewPlan:
+            context_ids = [context.id for context in contexts]
+            return ReviewPlan(
+                summary="双角色覆盖全部上下文",
+                required_agents=["defect", "intent"],
+                context_ids=context_ids,
+                shards={"defect": context_ids, "intent": context_ids},
+                budget_seconds=budget.seconds,
+            )
+
+    result = await Orchestrator(
+        Config(_env_file=None, runs_dir=tmp_path / "runs"),
+        pr_loader=github_loader,
+        team_lead=AllContextsLead(),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+    ).review(ReviewRequest(pr_url="https://github.com/acme/demo/pull/9"))
+
+    started = [
+        event
+        for event in Orchestrator.read_events(tmp_path / "runs", result.run_id)
+        if event.type == "agent.started"
+    ]
+    assert len(started) <= 6
+    assert {
+        file
+        for event in started
+        for file in event.data["files"]
+    } == {f"src/module_{index}.py" for index in range(9)}
 
 
 @pytest.mark.asyncio

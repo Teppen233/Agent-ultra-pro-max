@@ -48,6 +48,7 @@ class Config(BaseSettings):
     verifier_timeout_seconds: int = Field(default=120, gt=0)
     report_timeout_seconds: int = Field(default=30, gt=0)
     max_concurrency: int = Field(default=8, gt=0, le=32)
+    max_context_packs: int = Field(default=3, gt=0)
     context_character_budget: int = Field(default=120_000, gt=0)
 
     runs_dir: Path = Path("runs")

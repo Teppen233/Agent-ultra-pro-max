@@ -21,7 +21,7 @@ from reviewcrew.agents.team_lead import TeamLeadAgent
 from reviewcrew.agents.verifier import VerifierAgent
 from reviewcrew.budget import ReviewBudget
 from reviewcrew.config import Config
-from reviewcrew.context.builder import build_context
+from reviewcrew.context.builder import build_context, compact_context_packs
 from reviewcrew.events import EventStore, PipelineEvent
 from reviewcrew.github.pr_loader import PRLoadError, load_pr
 from reviewcrew.pipeline.dedupe import deduplicate_findings
@@ -1094,7 +1094,7 @@ class Orchestrator:
                     target=target,
                     summary=f"GitHub 模式未配置本地仓库，{capability}已降级",
                 )
-        return [
+        packs = [
             ContextPack(
                 id=f"ctx-{index}",
                 repository=pr.repository,
@@ -1108,6 +1108,11 @@ class Orchestrator:
             )
             for index, changed_file in enumerate(pr.files, start=1)
         ]
+        return compact_context_packs(
+            packs,
+            max_packs=config.max_context_packs,
+            character_budget=config.context_character_budget,
+        )
 
     @staticmethod
     async def _call_with_supported_keywords(callable_object: Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any) -> Any:
