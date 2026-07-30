@@ -14,6 +14,7 @@ const summary = (overrides: Partial<BenchmarkSummary> = {}): BenchmarkSummary =>
   observed_offline_catch_rate: null, offline_results_excluded_from_real_rate: false,
   false_positive_count: 1, verifier_accepted_count: 3, verifier_rejected_count: 1,
   needs_human_review_cases: 0, timed_out_cases: 0, elapsed_seconds: 25.4,
+  repositories: [],
   ...overrides,
 })
 
