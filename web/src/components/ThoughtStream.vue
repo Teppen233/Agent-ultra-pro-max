@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Search, Terminal } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Search, Terminal } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch } from 'vue'
 
 import type { PipelineEvent } from '@/types'
 
-const props = defineProps<{ events: PipelineEvent[] }>()
+const props = defineProps<{ events: PipelineEvent[]; expanded: boolean }>()
+const emit = defineEmits<{ toggle: [] }>()
 const stream = ref<HTMLElement | null>(null)
 const visible = computed(() =>
   props.events.filter((event) => event.type === 'thought' || event.type === 'tool').slice(-30),
@@ -21,15 +22,20 @@ watch(
   () => props.events.length,
   async () => {
     await nextTick()
-    if (stream.value) stream.value.scrollTop = stream.value.scrollHeight
+    if (props.expanded && stream.value) stream.value.scrollTop = stream.value.scrollHeight
   },
 )
 </script>
 
 <template>
-  <section class="thoughts">
-    <header><Terminal :size="14" /> Agent 实时事件</header>
-    <div ref="stream" class="thought-list scrollbar" aria-live="polite">
+  <section class="thoughts" :class="{ expanded }">
+    <button class="thought-toggle" type="button" :aria-expanded="expanded" @click="emit('toggle')">
+      <span><Terminal :size="14" /> Agent 实时事件 <b>{{ visible.length }}</b></span>
+      <span v-if="!expanded" class="latest-event">{{ visible.length ? '查看最新推理与工具调用' : '等待 Agent 事件' }}</span>
+      <ChevronDown v-if="expanded" :size="15" />
+      <ChevronUp v-else :size="15" />
+    </button>
+    <div v-if="expanded" ref="stream" class="thought-list scrollbar" aria-live="polite">
       <div v-if="visible.length === 0" class="thought-empty">
         等待 Agent 推理或工具调用
       </div>
@@ -53,24 +59,54 @@ watch(
 <style scoped>
 .thoughts {
   border-top: 1px solid var(--color-border);
-  min-height: 14rem;
+  background: var(--color-surface);
+  min-height: 2.65rem;
 }
 
-.thoughts header {
+.thought-toggle {
   align-items: center;
-  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+  border: 0;
   color: var(--color-muted);
+  cursor: pointer;
   display: flex;
   font-family: var(--font-mono);
   font-size: 0.69rem;
   gap: var(--space-2);
-  height: 2.5rem;
+  height: 2.65rem;
+  justify-content: space-between;
   padding: 0 var(--space-4);
   text-transform: uppercase;
+  width: 100%;
+}
+
+.thought-toggle:hover {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.thought-toggle > span:first-child {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.thought-toggle b {
+  color: var(--color-cyan);
+  font-weight: 500;
+}
+
+.latest-event {
+  color: var(--color-subtle);
+  font-family: var(--font-sans);
+  font-size: 0.65rem;
+  margin-left: auto;
+  text-transform: none;
 }
 
 .thought-list {
-  height: 15rem;
+  border-top: 1px solid var(--color-border);
+  height: 13rem;
   overflow-y: auto;
   padding: var(--space-3) var(--space-4);
 }

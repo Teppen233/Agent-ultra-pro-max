@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import { Archive, FileCode2, GitBranch, ShieldCheck } from 'lucide-vue-next'
-import { NButton, NEmpty, NSkeleton, useMessage } from 'naive-ui'
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import {
+  Archive,
+  ChevronLeft,
+  ChevronRight,
+  FileCode2,
+  GitBranch,
+  PanelLeftClose,
+  PanelRightClose,
+  ShieldCheck,
+} from 'lucide-vue-next'
+import { NButton, NEmpty, NSkeleton, NTooltip, useMessage } from 'naive-ui'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AgentFlow from '@/components/AgentFlow.vue'
@@ -16,6 +25,9 @@ const store = useReviewStore()
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const leftRailCollapsed = ref(false)
+const rightRailCollapsed = ref(false)
+const eventsExpanded = ref(false)
 
 const fileCounts = computed(() => {
   const counts = new Map<string, number>()
@@ -90,60 +102,91 @@ watch(
 
 <template>
   <div class="review-page">
-    <section class="command-band">
-      <div class="command-heading">
-        <div>
-          <span class="eyebrow"><ShieldCheck :size="14" /> Multi-Agent 动态审查</span>
-          <h1>代码审查驾驶舱</h1>
-        </div>
-        <span v-if="store.runId" class="run-id mono">RUN / {{ store.runId }}</span>
+    <header class="run-bar">
+      <div class="run-context">
+        <span><ShieldCheck :size="14" /> REVIEW WORKSPACE</span>
+        <strong>代码审查</strong>
       </div>
       <ReviewForm :loading="store.loading" @submit="start" @demo="demo" />
-    </section>
+      <div class="run-state" :class="{ active: store.runId }">
+        <span>{{ store.live ? 'LIVE' : store.runId ? 'REPLAY' : 'READY' }}</span>
+        <b class="mono">{{ store.runId ?? 'NO RUN' }}</b>
+      </div>
+    </header>
 
-    <section class="cockpit">
+    <section
+      class="workbench"
+      :class="{
+        'left-collapsed': leftRailCollapsed,
+        'right-collapsed': rightRailCollapsed,
+      }"
+    >
       <aside class="left-rail">
-        <DispatchBoard
-          :nodes="store.workflowNodes"
-          :log="store.dispatchLog"
-          :elapsed="store.elapsedSeconds"
-          :active="store.activeAgentCount"
-          :peak="store.concurrencyPeak"
-          :counts="store.taskCounts"
-          :selected="store.selectedWorkflowNode"
-          @select="store.selectNode"
-        />
-        <section class="file-section">
-          <h2><GitBranch :size="14" /> 变更命中</h2>
-          <div v-if="fileCounts.length" class="file-list">
-            <RouterLink v-for="[file, count] in fileCounts" :key="file" :to="store.runId ? `/review/${store.runId}/diff` : '/review'">
-              <FileCode2 :size="14" /><span>{{ file }}</span><b>{{ count }}</b>
-            </RouterLink>
-          </div>
-          <p v-else class="rail-empty">
-            Finding 出现后将在此按文件聚合
-          </p>
-        </section>
-        <section class="recent-section">
-          <h2><Archive :size="14" /> 最近运行</h2>
-          <div v-if="store.runs.length" class="recent-list">
-            <RouterLink v-for="run in store.runs.slice(0, 5)" :key="run.run_id" :to="`/review/${run.run_id}`">
-              <span class="mono">{{ run.run_id }}</span><i :class="run.status" />
-            </RouterLink>
-          </div>
-          <p v-else class="rail-empty">
-            暂无历史运行
-          </p>
-        </section>
+        <NTooltip placement="right">
+          <template #trigger>
+            <NButton
+              class="rail-toggle left"
+              quaternary
+              circle
+              size="small"
+              :aria-label="leftRailCollapsed ? '展开调度栏' : '收起调度栏'"
+              @click="leftRailCollapsed = !leftRailCollapsed"
+            >
+              <template #icon>
+                <ChevronRight v-if="leftRailCollapsed" :size="15" />
+                <PanelLeftClose v-else :size="15" />
+              </template>
+            </NButton>
+          </template>
+          {{ leftRailCollapsed ? '展开调度栏' : '收起调度栏' }}
+        </NTooltip>
+
+        <div class="rail-content">
+          <DispatchBoard
+            :nodes="store.workflowNodes"
+            :log="store.dispatchLog"
+            :elapsed="store.elapsedSeconds"
+            :active="store.activeAgentCount"
+            :peak="store.concurrencyPeak"
+            :counts="store.taskCounts"
+            :selected="store.selectedWorkflowNode"
+            @select="store.selectNode"
+          />
+
+          <section class="rail-section">
+            <h2><GitBranch :size="13" /> 变更命中 <span>{{ fileCounts.length }}</span></h2>
+            <div v-if="fileCounts.length" class="file-list">
+              <RouterLink
+                v-for="[file, count] in fileCounts"
+                :key="file"
+                :to="store.runId ? `/review/${store.runId}/diff` : '/review'"
+              >
+                <FileCode2 :size="13" /><span>{{ file }}</span><b>{{ count }}</b>
+              </RouterLink>
+            </div>
+            <p v-else class="rail-empty">
+              Finding 产生后按文件汇总。
+            </p>
+          </section>
+
+          <section class="rail-section recent-section">
+            <h2><Archive :size="13" /> 最近运行</h2>
+            <div v-if="store.runs.length" class="recent-list">
+              <RouterLink v-for="run in store.runs.slice(0, 5)" :key="run.run_id" :to="`/review/${run.run_id}`">
+                <span class="mono">{{ run.run_id }}</span><i :class="run.status" />
+              </RouterLink>
+            </div>
+            <p v-else class="rail-empty">
+              暂无历史运行。
+            </p>
+          </section>
+        </div>
       </aside>
 
       <section class="center-stage">
         <AgentFlow
           :workflow-nodes="store.workflowNodes"
           :workflow-edges="store.workflowEdges"
-          :layout-workflow-nodes="store.layoutWorkflowNodes"
-          :layout-workflow-edges="store.layoutWorkflowEdges"
-          :layout-key="store.runId"
           :selected-node-id="store.selectedNodeId"
           @select="store.selectNode"
         >
@@ -163,33 +206,66 @@ watch(
             />
           </template>
         </AgentFlow>
-        <ThoughtStream :events="store.events" />
+        <ThoughtStream
+          :events="store.events"
+          :expanded="eventsExpanded"
+          @toggle="eventsExpanded = !eventsExpanded"
+        />
       </section>
 
       <aside class="findings-panel">
-        <header>
-          <div><h2>审查结论</h2><span>保留 {{ store.retainedFindings.length }} · 驳回 {{ store.rejectedCount }}</span></div>
-          <RouterLink v-if="store.runId && store.diff" :to="`/review/${store.runId}/diff`">
-            <NButton quaternary circle title="打开 Diff">
+        <NTooltip placement="left">
+          <template #trigger>
+            <NButton
+              class="rail-toggle right"
+              quaternary
+              circle
+              size="small"
+              :aria-label="rightRailCollapsed ? '展开结论栏' : '收起结论栏'"
+              @click="rightRailCollapsed = !rightRailCollapsed"
+            >
               <template #icon>
-                <FileCode2 :size="17" />
+                <ChevronLeft v-if="rightRailCollapsed" :size="15" />
+                <PanelRightClose v-else :size="15" />
               </template>
             </NButton>
-          </RouterLink>
-        </header>
-        <div class="finding-list scrollbar">
-          <template v-if="store.loading">
-            <NSkeleton v-for="index in 3" :key="index" height="7rem" :sharp="true" />
           </template>
-          <FindingCard
-            v-for="finding in store.findings"
-            v-else
-            :key="finding.id"
-            :finding="finding"
-            :run-id="store.runId"
-            @select-workflow="store.selectNode"
-          />
-          <NEmpty v-if="!store.loading && store.findings.length === 0" description="提交 PR 或播放 Replay 后，候选 Finding 会实时进入这里" />
+          {{ rightRailCollapsed ? '展开结论栏' : '收起结论栏' }}
+        </NTooltip>
+
+        <div class="rail-content">
+          <header class="findings-header">
+            <div>
+              <h2>审查结论</h2>
+              <span>保留 {{ store.retainedFindings.length }} · 驳回 {{ store.rejectedCount }}</span>
+            </div>
+            <RouterLink v-if="store.runId && store.diff" :to="`/review/${store.runId}/diff`">
+              <NButton quaternary circle aria-label="打开 Diff">
+                <template #icon>
+                  <FileCode2 :size="16" />
+                </template>
+              </NButton>
+            </RouterLink>
+          </header>
+
+          <div class="finding-list scrollbar">
+            <template v-if="store.loading">
+              <NSkeleton v-for="index in 3" :key="index" height="6rem" :sharp="true" />
+            </template>
+            <FindingCard
+              v-for="finding in store.findings"
+              v-else
+              :key="finding.id"
+              :finding="finding"
+              :run-id="store.runId"
+              @select-workflow="store.selectNode"
+            />
+            <NEmpty
+              v-if="!store.loading && store.findings.length === 0"
+              size="small"
+              description="候选问题会在验证后进入这里"
+            />
+          </div>
         </div>
       </aside>
     </section>
@@ -198,72 +274,156 @@ watch(
 
 <style scoped>
 .review-page {
-  min-height: calc(100vh - 3.5rem);
+  display: grid;
+  grid-template-rows: 4.5rem minmax(0, 1fr);
+  height: calc(100vh - var(--app-bar-height));
+  min-height: 42rem;
+  overflow: hidden;
 }
 
-.command-band {
+.run-bar {
+  align-items: center;
+  background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
-  padding: var(--space-5);
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: auto minmax(38rem, 1fr) minmax(10rem, auto);
+  padding: 0 var(--space-4);
 }
 
-.command-heading {
-  align-items: flex-end;
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: var(--space-4);
+.run-context {
+  display: grid;
+  gap: 0.15rem;
 }
 
-.eyebrow {
+.run-context span {
   align-items: center;
   color: var(--color-cyan);
   display: flex;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
-  gap: var(--space-2);
-  text-transform: uppercase;
+  font-size: 0.6rem;
+  gap: var(--space-1);
 }
 
-h1 {
-  font-size: 1.35rem;
-  letter-spacing: 0;
-  margin: var(--space-1) 0 0;
+.run-context strong {
+  font-size: 0.92rem;
+  font-weight: 600;
 }
 
-.run-id {
-  color: var(--color-muted);
-  font-size: 0.68rem;
-}
-
-.cockpit {
+.run-state {
+  border-left: 1px solid var(--color-border);
   display: grid;
-  grid-template-columns: minmax(16rem, 21%) minmax(30rem, 49%) minmax(20rem, 30%);
-  min-height: calc(100vh - 12.5rem);
+  gap: 0.1rem;
+  min-width: 0;
+  padding-left: var(--space-4);
+}
+
+.run-state span {
+  color: var(--color-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+}
+
+.run-state.active span {
+  color: var(--color-green);
+}
+
+.run-state b {
+  font-size: 0.65rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench {
+  display: grid;
+  grid-template-columns: var(--left-rail-width) minmax(34rem, 1fr) var(--right-rail-width);
+  min-height: 0;
+  overflow: hidden;
+  transition: grid-template-columns 220ms ease;
+}
+
+.workbench.left-collapsed {
+  grid-template-columns: var(--collapsed-rail-width) minmax(34rem, 1fr) var(--right-rail-width);
+}
+
+.workbench.right-collapsed {
+  grid-template-columns: var(--left-rail-width) minmax(34rem, 1fr) var(--collapsed-rail-width);
+}
+
+.workbench.left-collapsed.right-collapsed {
+  grid-template-columns: var(--collapsed-rail-width) minmax(34rem, 1fr) var(--collapsed-rail-width);
 }
 
 .left-rail,
-.center-stage {
-  border-right: 1px solid var(--color-border);
+.findings-panel {
+  background: var(--color-surface);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
 }
 
 .left-rail {
-  max-height: calc(100vh - 12.5rem);
+  border-right: 1px solid var(--color-border);
+}
+
+.findings-panel {
+  border-left: 1px solid var(--color-border);
+}
+
+.rail-content {
+  height: 100%;
   overflow-y: auto;
+  transition: opacity 140ms ease;
 }
 
-.file-section,
-.recent-section {
-  border-bottom: 1px solid var(--color-border);
-  padding: var(--space-4);
+.left-collapsed .left-rail .rail-content,
+.right-collapsed .findings-panel .rail-content {
+  opacity: 0;
+  pointer-events: none;
 }
 
-.file-section h2,
-.recent-section h2 {
+.rail-toggle {
+  position: absolute;
+  top: var(--space-3);
+  z-index: 8;
+}
+
+.rail-toggle.left {
+  right: var(--space-2);
+}
+
+.rail-toggle.right {
+  left: var(--space-2);
+}
+
+.center-stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.rail-section {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-3);
+}
+
+.rail-section h2 {
   align-items: center;
   display: flex;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   gap: var(--space-2);
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-2);
   text-transform: uppercase;
+}
+
+.rail-section h2 > span {
+  color: var(--color-subtle);
+  font-family: var(--font-mono);
+  margin-left: auto;
 }
 
 .file-list,
@@ -278,9 +438,9 @@ h1 {
   border-radius: var(--radius-sm);
   color: var(--color-muted);
   display: grid;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   gap: var(--space-2);
-  min-height: 2rem;
+  min-height: 1.9rem;
   padding: var(--space-1) var(--space-2);
   text-decoration: none;
 }
@@ -303,11 +463,10 @@ h1 {
 
 .file-list b {
   color: var(--color-amber);
-  font-family: var(--font-mono);
 }
 
 .recent-list a {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .recent-list i {
@@ -323,78 +482,42 @@ h1 {
 
 .rail-empty {
   color: var(--color-subtle);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   line-height: 1.5;
-}
-
-.findings-panel header {
-  align-items: center;
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  height: 3.75rem;
-  justify-content: space-between;
-  padding: 0 var(--space-4);
-}
-
-.findings-panel h2 {
-  font-size: 0.82rem;
   margin: 0;
 }
 
-.findings-panel header span {
+.findings-header {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  height: 3.5rem;
+  justify-content: space-between;
+  padding: 0 var(--space-3) 0 3rem;
+}
+
+.findings-header h2 {
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.findings-header span {
   color: var(--color-muted);
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.61rem;
 }
 
 .finding-list {
   display: grid;
-  gap: var(--space-3);
-  max-height: calc(100vh - 16.25rem);
-  min-height: 24rem;
+  gap: var(--space-2);
+  max-height: calc(100vh - var(--app-bar-height) - 8rem);
   overflow-y: auto;
   padding: var(--space-3);
 }
 
-@media (max-width: 1100px) {
-  .cockpit {
-    grid-template-columns: 15rem minmax(24rem, 1fr);
-  }
-
-  .findings-panel {
-    border-top: 1px solid var(--color-border);
-    grid-column: 1 / -1;
-  }
-
-  .finding-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    max-height: none;
-  }
-}
-
-@media (max-width: 720px) {
-  .command-heading {
-    align-items: flex-start;
-    gap: var(--space-2);
-  }
-
-  .run-id {
-    max-width: 9rem;
-    overflow-wrap: anywhere;
-    text-align: right;
-  }
-
-  .cockpit {
-    display: block;
-  }
-
-  .left-rail,
-  .center-stage {
-    border-right: 0;
-  }
-
-  .finding-list {
-    grid-template-columns: 1fr;
+@media (max-width: 1450px) {
+  .run-bar {
+    grid-template-columns: auto minmax(34rem, 1fr) minmax(8rem, auto);
   }
 }
 </style>

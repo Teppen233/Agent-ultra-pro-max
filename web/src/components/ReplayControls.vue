@@ -137,12 +137,13 @@ function updateSpeed(value: string | number | boolean) {
 
 <style scoped>
 .replay-controls {
+  background: color-mix(in srgb, var(--color-surface) 86%, var(--color-bg));
   align-items: center;
   border-bottom: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-3);
   grid-template-columns: auto minmax(8rem, 1fr) auto;
-  min-height: 3.4rem;
+  min-height: 3.1rem;
   padding: var(--space-2) var(--space-4);
 }
 
@@ -168,14 +169,4 @@ function updateSpeed(value: string | number | boolean) {
   min-width: 8rem;
 }
 
-@media (max-width: 720px) {
-  .replay-controls {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .replay-slider {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-}
 </style>

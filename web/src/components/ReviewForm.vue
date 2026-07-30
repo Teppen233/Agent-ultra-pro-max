@@ -21,15 +21,15 @@ function submit() {
 
 <template>
   <form class="review-form" @submit.prevent="submit">
-    <NInput v-model:value="prUrl" size="large" placeholder="GitHub PR URL 或本地 .diff 路径" clearable />
-    <NInput v-model:value="repoPath" size="large" placeholder="本地仓库绝对路径" clearable />
-    <NButton attr-type="submit" type="primary" size="large" :loading="loading" :disabled="!prUrl.trim() || !repoPath.trim()">
+    <NInput v-model:value="prUrl" aria-label="GitHub PR URL 或本地 Diff 路径" placeholder="GitHub PR URL 或本地 .diff 路径" clearable />
+    <NInput v-model:value="repoPath" aria-label="本地仓库绝对路径" placeholder="本地仓库绝对路径" clearable />
+    <NButton attr-type="submit" type="primary" :loading="loading" :disabled="!prUrl.trim() || !repoPath.trim()">
       <template #icon>
         <Play :size="16" />
       </template>
       开始审查
     </NButton>
-    <NButton size="large" secondary @click="emit('demo')">
+    <NButton secondary @click="emit('demo')">
       <template #icon>
         <WandSparkles :size="16" />
       </template>
@@ -42,18 +42,6 @@ function submit() {
 .review-form {
   display: grid;
   gap: var(--space-2);
-  grid-template-columns: minmax(15rem, 1.5fr) minmax(13rem, 1fr) auto auto;
-}
-
-@media (max-width: 900px) {
-  .review-form {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-@media (max-width: 560px) {
-  .review-form {
-    grid-template-columns: 1fr;
-  }
+  grid-template-columns: minmax(14rem, 1.45fr) minmax(12rem, 1fr) auto auto;
 }
 </style>

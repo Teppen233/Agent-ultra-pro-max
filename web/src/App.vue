@@ -47,8 +47,8 @@ const themeOverrides: GlobalThemeOverrides = {
                 Benchmark
               </RouterLink>
             </nav>
-            <div class="system-state">
-              <Activity :size="14" /> API
+            <div class="system-state" title="后端 API 已连接">
+              <i /><Activity :size="13" /> API CONNECTED
             </div>
           </header>
           <main><RouterView /></main>
@@ -65,12 +65,12 @@ const themeOverrides: GlobalThemeOverrides = {
 
 .topbar {
   align-items: center;
-  background: color-mix(in srgb, var(--color-bg) 92%, transparent);
+  background: color-mix(in srgb, var(--color-bg) 94%, var(--color-surface));
   border-bottom: 1px solid var(--color-border);
   display: grid;
-  grid-template-columns: minmax(11rem, 1fr) auto minmax(11rem, 1fr);
-  height: 3.5rem;
-  padding: 0 var(--space-5);
+  grid-template-columns: 14rem 1fr auto;
+  height: var(--app-bar-height);
+  padding: 0 var(--space-4);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -86,8 +86,8 @@ const themeOverrides: GlobalThemeOverrides = {
 
 .brand {
   color: var(--color-text);
-  font-size: 0.96rem;
-  font-weight: 700;
+  font-size: 0.9rem;
+  font-weight: 600;
   text-decoration: none;
 }
 
@@ -97,19 +97,23 @@ const themeOverrides: GlobalThemeOverrides = {
   border-radius: var(--radius-md);
   color: var(--color-bg);
   display: inline-flex;
-  height: 1.85rem;
+  height: 1.9rem;
   justify-content: center;
-  width: 1.85rem;
+  width: 1.9rem;
 }
 
 .nav {
   display: flex;
   gap: var(--space-1);
+  height: 100%;
 }
 
 .nav a {
+  align-self: center;
   border-radius: var(--radius-md);
   color: var(--color-muted);
+  font-size: 0.76rem;
+  font-weight: 500;
   padding: var(--space-2) var(--space-3);
   text-decoration: none;
 }
@@ -120,29 +124,28 @@ const themeOverrides: GlobalThemeOverrides = {
   color: var(--color-text);
 }
 
+.nav a.router-link-active {
+  box-shadow: inset 0 -2px var(--color-cyan);
+}
+
 .system-state {
+  background: color-mix(in srgb, var(--color-green) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-green) 22%, var(--color-border));
+  border-radius: var(--radius-sm);
   color: var(--color-green);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.62rem;
+  gap: var(--space-1);
   justify-self: end;
+  padding: var(--space-1) var(--space-2);
   text-transform: uppercase;
 }
 
-@media (max-width: 680px) {
-  .topbar {
-    grid-template-columns: 1fr auto;
-    padding: 0 var(--space-3);
-  }
-
-  .brand > span:last-child,
-  .system-state,
-  .nav a {
-    font-size: 0;
-  }
-
-  .nav a svg {
-    height: 1.1rem;
-    width: 1.1rem;
-  }
+.system-state i {
+  animation: pulse-opacity 1.5s infinite;
+  background: var(--color-green);
+  border-radius: 50%;
+  height: 0.4rem;
+  width: 0.4rem;
 }
 </style>

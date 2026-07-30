@@ -119,16 +119,21 @@ onMounted(async () => {
 
 <style scoped>
 .diff-page {
-  min-height: calc(100vh - 3.5rem);
+  display: grid;
+  grid-template-rows: 4.5rem minmax(0, 1fr);
+  height: calc(100vh - var(--app-bar-height));
+  min-height: 38rem;
+  overflow: hidden;
 }
 
 .diff-toolbar {
   align-items: center;
+  background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-3);
   grid-template-columns: auto 1fr auto;
-  min-height: 4.5rem;
+  height: 4.5rem;
   padding: var(--space-3) var(--space-5);
 }
 
@@ -151,13 +156,14 @@ onMounted(async () => {
 
 .diff-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(19rem, 28%);
+  grid-template-columns: minmax(0, 1fr) minmax(21rem, 26%);
+  min-height: 0;
 }
 
 .diff-code {
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
-  min-height: calc(100vh - 8rem);
+  min-height: 0;
   overflow: auto;
   padding: var(--space-3) 0;
 }
@@ -214,6 +220,8 @@ onMounted(async () => {
 }
 
 .finding-detail {
+  background: var(--color-bg);
+  overflow-y: auto;
   padding: var(--space-6);
 }
 
@@ -238,20 +246,5 @@ onMounted(async () => {
 
 .page-empty {
   margin-top: 20vh;
-}
-
-@media (max-width: 800px) {
-  .diff-layout {
-    display: block;
-  }
-
-  .diff-code {
-    border-right: 0;
-    min-height: 25rem;
-  }
-
-  .finding-detail {
-    border-top: 1px solid var(--color-border);
-  }
 }
 </style>

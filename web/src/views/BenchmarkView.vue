@@ -119,11 +119,15 @@ onMounted(async () => {
 
 <style scoped>
 .benchmark-page {
-  padding: var(--space-6);
+  height: calc(100vh - var(--app-bar-height));
+  overflow-y: auto;
 }
 
 .benchmark-header {
-  margin-bottom: var(--space-6);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  margin: 0;
+  padding: var(--space-4) var(--space-6);
 }
 
 .benchmark-header > span {
@@ -152,7 +156,7 @@ onMounted(async () => {
   border-top: 1px solid var(--color-border);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  margin: 0 calc(var(--space-6) * -1);
+  margin: 0;
   padding: 0 var(--space-6);
 }
 
@@ -160,7 +164,8 @@ onMounted(async () => {
   display: grid;
   gap: var(--space-1);
   grid-template-columns: auto 1fr;
-  padding: var(--space-5);
+  min-height: 7.5rem;
+  padding: var(--space-5) var(--space-6);
 }
 
 .metric-band article + article {
@@ -181,7 +186,7 @@ onMounted(async () => {
 
 .metric-band strong {
   font-family: var(--font-mono);
-  font-size: 1.8rem;
+  font-size: 1.65rem;
   line-height: 1.1;
 }
 
@@ -189,12 +194,16 @@ onMounted(async () => {
   display: grid;
   gap: var(--space-6);
   grid-template-columns: minmax(24rem, 0.9fr) minmax(32rem, 1.4fr);
-  margin-top: var(--space-6);
+  padding: var(--space-5) var(--space-6) var(--space-6);
 }
 
 .chart-panel,
 .table-panel {
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   min-width: 0;
+  padding: var(--space-4);
 }
 
 .chart-panel header,
@@ -203,7 +212,7 @@ onMounted(async () => {
   border-bottom: 1px solid var(--color-border);
   display: flex;
   justify-content: space-between;
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
   padding-bottom: var(--space-3);
 }
 
@@ -225,26 +234,10 @@ onMounted(async () => {
   width: 100%;
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 1250px) {
   .benchmark-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 650px) {
-  .benchmark-page {
-    padding: var(--space-4);
-  }
-
-  .metric-band {
-    grid-template-columns: 1fr;
-    margin: 0 calc(var(--space-4) * -1);
-    padding: 0 var(--space-4);
-  }
-
-  .metric-band article + article {
-    border-left: 0;
-    border-top: 1px solid var(--color-border);
-  }
-}
 </style>

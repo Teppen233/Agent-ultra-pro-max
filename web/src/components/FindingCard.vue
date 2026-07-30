@@ -106,7 +106,7 @@ function toggle() {
   display: grid;
   gap: var(--space-3);
   grid-template-columns: 0.2rem minmax(0, 1fr) 2.15rem 1rem;
-  min-height: 7.1rem;
+  min-height: 6.2rem;
   padding: 0 var(--space-3) 0 0;
   text-align: left;
   width: 100%;
@@ -143,9 +143,9 @@ function toggle() {
 
 .finding-main strong {
   display: -webkit-box;
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   line-height: 1.35;
-  margin: var(--space-2) 0;
+  margin: var(--space-1) 0 var(--space-2);
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
