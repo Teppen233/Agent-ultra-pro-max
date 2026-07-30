@@ -161,7 +161,7 @@ class DefectAgent(AgentRuntime):
         last_error = None
         for attempt in range(3):
             try:
-                async with httpx.AsyncClient(timeout=90.0) as client:
+                async with httpx.AsyncClient(timeout=45.0) as client:
                     resp = await client.post(
                         url,
                         headers={

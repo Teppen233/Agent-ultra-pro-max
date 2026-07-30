@@ -103,8 +103,8 @@ class Orchestrator:
                     defect_agent = DefectAgent(None, agent_id="defect-1")
                     intent_agent = IntentAgent(None, agent_id="intent-1")
 
-                    # 串行调用（避免 API 并发限制），最多审查 5 个文件
-                    packs_to_review = packs[:5] if packs else []
+                    # 串行调用，最多审查 3 个核心文件
+                    packs_to_review = packs[:3] if packs else []
                     defect_findings = await defect_agent.run(contexts=packs_to_review, pr_data=pr_data)
                     intent_findings = await intent_agent.run(contexts=packs_to_review, pr_data=pr_data)
                     all_findings.extend(defect_findings)
