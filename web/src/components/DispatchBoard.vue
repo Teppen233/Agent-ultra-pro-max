@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Activity, CheckCircle2, Clock3, ListTodo, Network, Timer, XCircle } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { Activity, CheckCircle2, ListTodo, Network, Timer, XCircle } from 'lucide-vue-next'
+import { NButton, NButtonGroup } from 'naive-ui'
+import { computed, ref } from 'vue'
 
 import type { DispatchEntry, WorkflowNode, WorkflowStatus } from '@/types'
 
@@ -15,9 +16,23 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ select: [nodeId: string] }>()
 
+const activeView = ref<'tasks' | 'activity'>('tasks')
 const remaining = computed(() => Math.max(0, 600 - props.elapsed))
+const errorCount = computed(() => props.counts.failed + props.counts.cancelled)
+const statusOrder: Record<WorkflowStatus, number> = {
+  running: 0,
+  waiting: 1,
+  queued: 2,
+  failed: 3,
+  cancelled: 4,
+  completed: 5,
+}
 const missions = computed(() =>
-  props.nodes.filter((node) => node.kind === 'agent_task' || node.kind === 'verifier'),
+  props.nodes
+    .filter((node) => node.kind === 'agent_task' || node.kind === 'verifier')
+    .map((node, index) => ({ node, index }))
+    .sort((left, right) => statusOrder[left.node.status] - statusOrder[right.node.status] || left.index - right.index)
+    .map(({ node }) => node),
 )
 
 const agentNames = {
@@ -37,26 +52,28 @@ const agentNames = {
           动态调度
         </h2>
       </div>
-      <span class="countdown"><Timer :size="13" /> {{ Math.floor(remaining / 60) }}:{{ String(Math.floor(remaining % 60)).padStart(2, '0') }}</span>
+      <span class="countdown">
+        <Timer :size="13" />
+        {{ Math.floor(remaining / 60) }}:{{ String(Math.floor(remaining % 60)).padStart(2, '0') }}
+      </span>
     </header>
 
-    <div class="concurrency-band">
+    <div class="summary-strip">
       <div>
-        <span>当前并发</span>
-        <strong>{{ active }}<small> / 4</small></strong>
+        <Activity :size="13" />
+        <span>并发</span>
+        <strong>{{ active }}<small> / 峰值 {{ peak }}</small></strong>
       </div>
       <div>
-        <span>峰值并发</span>
-        <strong>{{ peak }}</strong>
+        <CheckCircle2 :size="13" />
+        <span>完成</span>
+        <strong>{{ counts.completed }}</strong>
       </div>
-      <Activity :size="22" :class="{ active: active > 0 }" />
-    </div>
-
-    <div class="task-metrics">
-      <span><Clock3 :size="12" /> 等待 <b>{{ counts.queued }}</b></span>
-      <span><Activity :size="12" /> 执行 <b>{{ counts.running }}</b></span>
-      <span><CheckCircle2 :size="12" /> 完成 <b>{{ counts.completed }}</b></span>
-      <span><XCircle :size="12" /> 失败/驳回 <b>{{ counts.failed + counts.cancelled }}</b></span>
+      <div :class="{ danger: errorCount > 0 }">
+        <XCircle :size="13" />
+        <span>异常</span>
+        <strong>{{ errorCount }}</strong>
+      </div>
     </div>
 
     <div v-if="selected" class="selected-task">
@@ -65,12 +82,28 @@ const agentNames = {
       <p>{{ selected.detail ?? '暂无更多执行详情。' }}</p>
     </div>
 
-    <div class="mission-list">
-      <div class="subheading">
-        <ListTodo :size="13" /> Coordinator 派发任务
-      </div>
+    <div class="dispatch-tabs">
+      <NButtonGroup size="small" aria-label="调度栏视图">
+        <NButton
+          :type="activeView === 'tasks' ? 'primary' : 'default'"
+          :aria-pressed="activeView === 'tasks'"
+          @click="activeView = 'tasks'"
+        >
+          <ListTodo :size="12" /> 任务 {{ missions.length }}
+        </NButton>
+        <NButton
+          :type="activeView === 'activity' ? 'primary' : 'default'"
+          :aria-pressed="activeView === 'activity'"
+          @click="activeView = 'activity'"
+        >
+          <Activity :size="12" /> 动态 {{ log.length }}
+        </NButton>
+      </NButtonGroup>
+    </div>
+
+    <div v-if="activeView === 'tasks'" class="mission-list scrollbar">
       <p v-if="missions.length === 0" class="empty-copy">
-        Coordinator 尚未派发任务，任务不会预先固定。
+        Coordinator 尚未派发任务。
       </p>
       <button
         v-for="mission in missions"
@@ -80,18 +113,18 @@ const agentNames = {
         @click="emit('select', mission.id)"
       >
         <i />
-        <span><b>{{ mission.agent ? agentNames[mission.agent] : '任务' }}</b>{{ mission.label }}</span>
+        <span>
+          <b>{{ mission.agent ? agentNames[mission.agent] : '任务' }}</b>
+          {{ mission.label }}
+        </span>
       </button>
     </div>
 
-    <div class="dispatch-log">
-      <div class="subheading">
-        <Activity :size="13" /> 调度决策
-      </div>
+    <div v-else class="dispatch-log scrollbar">
       <p v-if="log.length === 0" class="empty-copy">
-        调度事件将按发生顺序记录在这里。
+        调度事件将在这里按时间记录。
       </p>
-      <article v-for="entry in log.slice(0, 6)" :key="entry.id" :class="entry.tone">
+      <article v-for="entry in log.slice(0, 12)" :key="entry.id" :class="entry.tone">
         <i />
         <div><strong>{{ entry.title }}</strong><span>{{ entry.detail }}</span></div>
       </article>
@@ -101,137 +134,136 @@ const agentNames = {
 
 <style scoped>
 .dispatch-board {
-  border-bottom: 1px solid var(--color-border);
+  min-width: 0;
 }
 
 .dispatch-board > header {
   align-items: center;
   display: flex;
-  height: 3.8rem;
+  height: 3.5rem;
   justify-content: space-between;
-  padding: 0 var(--space-4);
+  padding: 0 3rem 0 var(--space-3);
 }
 
 .dispatch-board > header div,
 .countdown,
-.subheading,
-.task-metrics span {
+.summary-strip div,
+.dispatch-tabs :deep(.n-button__content) {
   align-items: center;
   display: flex;
 }
 
-.dispatch-board > header div,
-.subheading {
+.dispatch-board > header div {
   gap: var(--space-2);
 }
 
 .dispatch-board h2 {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   margin: 0;
 }
 
 .countdown {
   color: var(--color-muted);
   font-family: var(--font-mono);
-  font-size: 0.68rem;
-  gap: var(--space-1);
-}
-
-.concurrency-band {
-  align-items: center;
-  background: var(--color-surface-raised);
-  border-block: 1px solid var(--color-border);
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  padding: var(--space-3) var(--space-4);
-}
-
-.concurrency-band div {
-  display: grid;
-  gap: var(--space-1);
-}
-
-.concurrency-band span {
-  color: var(--color-subtle);
-  font-size: 0.64rem;
-}
-
-.concurrency-band strong {
-  font-family: var(--font-mono);
-  font-size: 1.15rem;
-  font-weight: 500;
-}
-
-.concurrency-band small {
-  color: var(--color-subtle);
-  font-size: 0.7rem;
-}
-
-.concurrency-band > svg {
-  color: var(--color-subtle);
-}
-
-.concurrency-band > svg.active {
-  animation: pulse-opacity 1.1s ease-in-out infinite;
-  color: var(--color-green);
-}
-
-.task-metrics {
-  display: grid;
-  gap: var(--space-2);
-  grid-template-columns: 1fr 1fr;
-  padding: var(--space-3) var(--space-4);
-}
-
-.task-metrics span {
-  color: var(--color-muted);
   font-size: 0.65rem;
   gap: var(--space-1);
 }
 
-.task-metrics b {
+.summary-strip {
+  background: var(--color-surface-raised);
+  border-block: 1px solid var(--color-border);
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+}
+
+.summary-strip div {
+  color: var(--color-muted);
+  display: grid;
+  gap: var(--space-1);
+  grid-template-columns: auto 1fr;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+}
+
+.summary-strip div + div {
+  border-left: 1px solid var(--color-border);
+}
+
+.summary-strip span {
+  font-size: 0.6rem;
+}
+
+.summary-strip strong {
   color: var(--color-text);
   font-family: var(--font-mono);
-  margin-left: auto;
+  font-size: 0.88rem;
+  font-weight: 500;
+  grid-column: 1 / -1;
+}
+
+.summary-strip small {
+  color: var(--color-subtle);
+  font-size: 0.55rem;
+  font-weight: 400;
+}
+
+.summary-strip .danger,
+.summary-strip .danger strong {
+  color: var(--color-red);
 }
 
 .selected-task {
-  border-block: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
   display: grid;
   gap: var(--space-1);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3);
 }
 
-.selected-task > span,
-.subheading {
+.selected-task > span {
   color: var(--color-cyan);
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.59rem;
 }
 
 .selected-task strong {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
 }
 
 .selected-task p {
   color: var(--color-muted);
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   line-height: 1.45;
   margin: 0;
+}
+
+.dispatch-tabs {
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-2) var(--space-3);
+}
+
+.dispatch-tabs :deep(.n-button-group) {
+  display: flex;
+  width: 100%;
+}
+
+.dispatch-tabs :deep(.n-button) {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+
+.dispatch-tabs :deep(.n-button__content) {
+  gap: var(--space-1);
+  justify-content: center;
 }
 
 .mission-list,
 .dispatch-log {
   display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-}
-
-.mission-list {
-  border-top: 1px solid var(--color-border);
-  max-height: 14rem;
+  gap: var(--space-1);
+  max-height: 22rem;
   overflow-y: auto;
+  padding: var(--space-2) var(--space-3) var(--space-3);
 }
 
 .mission-list button {
@@ -276,9 +308,13 @@ const agentNames = {
   background: var(--color-red);
 }
 
+.mission-list button.completed {
+  opacity: 0.65;
+}
+
 .mission-list button span {
   display: grid;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   gap: 0.15rem;
   line-height: 1.35;
   min-width: 0;
@@ -287,12 +323,12 @@ const agentNames = {
 .mission-list button b {
   color: var(--color-subtle);
   font-family: var(--font-mono);
-  font-size: 0.59rem;
+  font-size: 0.57rem;
   font-weight: 500;
 }
 
 .dispatch-log {
-  border-top: 1px solid var(--color-border);
+  gap: var(--space-2);
 }
 
 .dispatch-log article {
@@ -318,24 +354,28 @@ const agentNames = {
   background: var(--color-red);
 }
 
-.dispatch-log article div {
-  display: grid;
-  gap: 0.15rem;
-}
-
-.dispatch-log strong {
-  font-size: 0.67rem;
-  font-weight: 500;
-}
-
-.dispatch-log span,
-.empty-copy {
-  color: var(--color-subtle);
-  font-size: 0.62rem;
+.dispatch-log strong,
+.dispatch-log span {
+  display: block;
+  font-size: 0.65rem;
   line-height: 1.4;
 }
 
+.dispatch-log strong {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.dispatch-log span {
+  color: var(--color-subtle);
+  margin-top: 0.1rem;
+}
+
 .empty-copy {
-  margin: var(--space-2) 0;
+  color: var(--color-subtle);
+  font-size: 0.67rem;
+  line-height: 1.5;
+  margin: var(--space-3) 0;
+  text-align: center;
 }
 </style>

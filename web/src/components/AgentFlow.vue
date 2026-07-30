@@ -15,7 +15,14 @@ import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue
 
 import type { AgentName, WorkflowEdge, WorkflowKind, WorkflowNode, WorkflowStatus } from '@/types'
 
-import { layoutWorkflowGraph } from './workflowLayout'
+import WorkflowEdgePath from './WorkflowEdgePath.vue'
+import {
+  layoutWorkflowGraph,
+  placeProvisionalNodes,
+  routeWorkflowEdges,
+  type WorkflowNodeDimensions,
+  type WorkflowPosition,
+} from './workflowLayout'
 
 const props = defineProps<{
   workflowNodes: WorkflowNode[]
@@ -23,7 +30,7 @@ const props = defineProps<{
   selectedNodeId: string | null
 }>()
 const emit = defineEmits<{ select: [nodeId: string] }>()
-const { fitView, zoomIn: zoomGraphIn, zoomOut: zoomGraphOut } = useVueFlow()
+const { fitView, getNodes, zoomIn: zoomGraphIn, zoomOut: zoomGraphOut } = useVueFlow()
 
 const kindLabel: Record<WorkflowKind, string> = {
   input: '输入',
@@ -67,9 +74,8 @@ function aggregateToolNodes(sourceNodes: WorkflowNode[], sourceEdges: WorkflowEd
 }
 
 const displayGraph = computed(() => aggregateToolNodes(props.workflowNodes, props.workflowEdges))
-const layoutPositions = computed(() =>
-  layoutWorkflowGraph(displayGraph.value.nodes, displayGraph.value.edges),
-)
+const stablePositions = shallowRef<Map<string, WorkflowPosition>>(new Map())
+const measuredDimensions = shallowRef<WorkflowNodeDimensions>(new Map())
 const currentFocusId = ref<string | null>(null)
 const focusedBranchIds = shallowRef<Set<string>>(new Set())
 
@@ -113,7 +119,7 @@ const nodes = computed<Node[]>(() =>
   displayGraph.value.nodes.map((item) => ({
     id: item.id,
     type: 'custom',
-    position: layoutPositions.value.get(item.id) ?? { x: 0, y: 0 },
+    position: stablePositions.value.get(item.id) ?? { x: 0, y: 0 },
     sourcePosition: Position.Bottom,
     targetPosition: Position.Top,
     data: {
@@ -137,9 +143,16 @@ const nodes = computed<Node[]>(() =>
 
 const edges = computed<Edge[]>(() => {
   const visible = new Set(displayGraph.value.nodes.map((node) => node.id))
+  const routes = routeWorkflowEdges(
+    displayGraph.value.nodes,
+    displayGraph.value.edges,
+    stablePositions.value,
+    measuredDimensions.value,
+  )
   return displayGraph.value.edges
     .filter((edge) => visible.has(edge.source) && visible.has(edge.target))
     .map((edge) => {
+      const route = routes.get(edge.id)
       const inFocus =
         focusedBranchIds.value.has(edge.source) && focusedBranchIds.value.has(edge.target)
       return {
@@ -154,8 +167,19 @@ const edges = computed<Edge[]>(() => {
           currentFocusId.value && !inFocus ? 'is-muted-edge' : '',
         ],
         animated: runningIds.value.has(edge.source) || runningIds.value.has(edge.target),
-        markerEnd: MarkerType.ArrowClosed,
-        type: edge.relation === 'evidence' ? 'straight' : 'smoothstep',
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color:
+            edge.relation === 'handoff'
+              ? 'var(--color-violet)'
+              : edge.relation === 'challenge'
+                ? 'var(--color-amber)'
+                : edge.relation === 'evidence'
+                  ? 'var(--color-blue)'
+                  : 'var(--color-border-strong)',
+        },
+        type: 'workflow',
+        data: { path: route?.path ?? '' },
       }
     })
 })
@@ -173,11 +197,13 @@ function clearFocus() {
 
 async function fitAll() {
   clearFocus()
+  if (viewportFitTimer !== null) window.clearTimeout(viewportFitTimer)
   await nextTick()
   await fitView({ padding: 0.18, duration: 360, maxZoom: 1 })
 }
 
-let layoutFitTimer: number | null = null
+let layoutCommitTimer: number | null = null
+let viewportFitTimer: number | null = null
 
 async function fitVisibleGraph(incremental: boolean) {
   await nextTick()
@@ -192,21 +218,90 @@ async function fitVisibleGraph(incremental: boolean) {
   })
 }
 
+function scheduleViewportFit(incremental: boolean) {
+  if (viewportFitTimer !== null) window.clearTimeout(viewportFitTimer)
+  viewportFitTimer = window.setTimeout(() => {
+    viewportFitTimer = null
+    void fitVisibleGraph(incremental)
+  }, 520)
+}
+
+function commitStableLayout(incremental: boolean) {
+  stablePositions.value = layoutWorkflowGraph(
+    displayGraph.value.nodes,
+    displayGraph.value.edges,
+    measuredDimensions.value,
+  )
+  scheduleViewportFit(incremental)
+}
+
+function scheduleLayoutCommit(incremental: boolean) {
+  if (layoutCommitTimer !== null) window.clearTimeout(layoutCommitTimer)
+  layoutCommitTimer = window.setTimeout(() => {
+    layoutCommitTimer = null
+    commitStableLayout(incremental)
+  }, 600)
+}
+
+function captureMeasuredDimensions() {
+  const next = new Map(measuredDimensions.value)
+  let changed = false
+  for (const graphNode of getNodes.value) {
+    const width = Math.ceil(graphNode.dimensions.width)
+    const height = Math.ceil(graphNode.dimensions.height)
+    if (width <= 0 || height <= 0) continue
+    const previous = next.get(graphNode.id)
+    if (previous?.width === width && previous.height === height) continue
+    next.set(graphNode.id, { width, height })
+    changed = true
+  }
+  if (!changed) return
+  measuredDimensions.value = next
+  scheduleLayoutCommit(stablePositions.value.size > 0)
+}
+
 watch(
-  () => displayGraph.value.nodes.map((node) => node.id).sort().join('|'),
-  (signature, previous = '') => {
-    if (!signature || signature === previous) return
-    if (layoutFitTimer !== null) window.clearTimeout(layoutFitTimer)
-    layoutFitTimer = window.setTimeout(() => {
-      layoutFitTimer = null
-      void fitVisibleGraph(Boolean(previous))
-    }, 520)
+  () => [
+    displayGraph.value.nodes.map((node) => node.id).sort().join('|'),
+    displayGraph.value.edges.map((edge) => edge.id).sort().join('|'),
+  ] as const,
+  ([nodeSignature], previous) => {
+    const previousNodes = previous?.[0] ?? ''
+    const previousEdges = previous?.[1] ?? ''
+    if (!nodeSignature) {
+      stablePositions.value = new Map()
+      return
+    }
+    const incremental = Boolean(previousNodes || previousEdges)
+    if (stablePositions.value.size === 0) {
+      stablePositions.value = layoutWorkflowGraph(
+        displayGraph.value.nodes,
+        displayGraph.value.edges,
+        measuredDimensions.value,
+      )
+      scheduleViewportFit(false)
+      return
+    }
+    stablePositions.value = placeProvisionalNodes(
+      displayGraph.value.nodes,
+      displayGraph.value.edges,
+      stablePositions.value,
+      measuredDimensions.value,
+    )
+    scheduleLayoutCommit(incremental)
   },
   { flush: 'post', immediate: true },
 )
 
+watch(
+  () => getNodes.value.map((node) => `${node.id}:${node.dimensions.width}:${node.dimensions.height}`).join('|'),
+  () => captureMeasuredDimensions(),
+  { flush: 'post' },
+)
+
 onBeforeUnmount(() => {
-  if (layoutFitTimer !== null) window.clearTimeout(layoutFitTimer)
+  if (layoutCommitTimer !== null) window.clearTimeout(layoutCommitTimer)
+  if (viewportFitTimer !== null) window.clearTimeout(viewportFitTimer)
 })
 </script>
 
@@ -281,6 +376,7 @@ onBeforeUnmount(() => {
         :min-zoom="0.28"
         :max-zoom="1.6"
         @node-click="selectNode"
+        @nodes-initialized="captureMeasuredDimensions"
       >
         <template #node-custom="{ data }">
           <div class="node-content">
@@ -298,6 +394,9 @@ onBeforeUnmount(() => {
               <i />{{ data.statusLabel }}
             </div>
           </div>
+        </template>
+        <template #edge-workflow="edgeProps">
+          <WorkflowEdgePath v-bind="edgeProps" />
         </template>
         <Background :variant="BackgroundVariant.Dots" :gap="24" :size="1" />
       </VueFlow>
@@ -462,8 +561,7 @@ onBeforeUnmount(() => {
   color: var(--color-muted);
   cursor: pointer;
   font-family: var(--font-mono);
-  height: 7rem;
-  overflow: hidden;
+  min-height: 7rem;
   padding: var(--space-3);
   text-align: left;
   transition: transform 460ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
@@ -473,14 +571,13 @@ onBeforeUnmount(() => {
 .flow-wrap :deep(.vue-flow__node.kind-input),
 .flow-wrap :deep(.vue-flow__node.kind-coordinator),
 .flow-wrap :deep(.vue-flow__node.kind-report) {
-  height: 5.5rem;
+  min-height: 5.5rem;
   width: 13rem;
 }
 
 .node-content {
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-width: 0;
 }
 
@@ -512,26 +609,20 @@ onBeforeUnmount(() => {
 
 .node-label {
   color: var(--color-text);
-  display: -webkit-box;
   font-family: var(--font-sans);
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1.35;
   margin-top: var(--space-2);
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .node-detail {
   color: var(--color-muted);
-  display: -webkit-box;
   font-size: 0.62rem;
   line-height: 1.4;
   margin-top: var(--space-1);
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .node-status {
@@ -540,7 +631,7 @@ onBeforeUnmount(() => {
   display: flex;
   font-size: 0.59rem;
   gap: var(--space-1);
-  margin-top: auto;
+  margin-top: var(--space-2);
 }
 
 .node-status i {

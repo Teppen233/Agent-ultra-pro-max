@@ -4,12 +4,13 @@ import {
   ChevronLeft,
   ChevronRight,
   FileCode2,
+  FileText,
   GitBranch,
   PanelLeftClose,
   PanelRightClose,
   ShieldCheck,
 } from 'lucide-vue-next'
-import { NButton, NEmpty, NSkeleton, NTooltip, useMessage } from 'naive-ui'
+import { NButton, NCollapse, NCollapseItem, NEmpty, NSkeleton, NTooltip, useMessage } from 'naive-ui'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -153,33 +154,42 @@ watch(
             @select="store.selectNode"
           />
 
-          <section class="rail-section">
-            <h2><GitBranch :size="13" /> 变更命中 <span>{{ fileCounts.length }}</span></h2>
-            <div v-if="fileCounts.length" class="file-list">
-              <RouterLink
-                v-for="[file, count] in fileCounts"
-                :key="file"
-                :to="store.runId ? `/review/${store.runId}/diff` : '/review'"
-              >
-                <FileCode2 :size="13" /><span>{{ file }}</span><b>{{ count }}</b>
-              </RouterLink>
-            </div>
-            <p v-else class="rail-empty">
-              Finding 产生后按文件汇总。
-            </p>
-          </section>
-
-          <section class="rail-section recent-section">
-            <h2><Archive :size="13" /> 最近运行</h2>
-            <div v-if="store.runs.length" class="recent-list">
-              <RouterLink v-for="run in store.runs.slice(0, 5)" :key="run.run_id" :to="`/review/${run.run_id}`">
-                <span class="mono">{{ run.run_id }}</span><i :class="run.status" />
-              </RouterLink>
-            </div>
-            <p v-else class="rail-empty">
-              暂无历史运行。
-            </p>
-          </section>
+          <NCollapse class="rail-utilities" arrow-placement="right">
+            <NCollapseItem name="files">
+              <template #header>
+                <span class="utility-heading">
+                  <GitBranch :size="13" /> 变更命中 <b>{{ fileCounts.length }}</b>
+                </span>
+              </template>
+              <div v-if="fileCounts.length" class="file-list">
+                <RouterLink
+                  v-for="[file, count] in fileCounts"
+                  :key="file"
+                  :to="store.runId ? `/review/${store.runId}/diff` : '/review'"
+                >
+                  <FileCode2 :size="13" /><span>{{ file }}</span><b>{{ count }}</b>
+                </RouterLink>
+              </div>
+              <p v-else class="rail-empty">
+                Finding 产生后按文件汇总。
+              </p>
+            </NCollapseItem>
+            <NCollapseItem name="runs">
+              <template #header>
+                <span class="utility-heading">
+                  <Archive :size="13" /> 最近运行 <b>{{ store.runs.length }}</b>
+                </span>
+              </template>
+              <div v-if="store.runs.length" class="recent-list scrollbar">
+                <RouterLink v-for="run in store.runs" :key="run.run_id" :to="`/review/${run.run_id}`">
+                  <span class="mono" :title="run.run_id">{{ run.run_id }}</span><i :class="run.status" />
+                </RouterLink>
+              </div>
+              <p v-else class="rail-empty">
+                暂无历史运行。
+              </p>
+            </NCollapseItem>
+          </NCollapse>
         </div>
       </aside>
 
@@ -237,15 +247,32 @@ watch(
           <header class="findings-header">
             <div>
               <h2>审查结论</h2>
-              <span>保留 {{ store.retainedFindings.length }} · 驳回 {{ store.rejectedCount }}</span>
+              <span>
+                确认 {{ store.retainedFindings.length }} · 待复核 {{ store.needsReviewCount }} · 排除
+                {{ store.rejectedCount }}
+              </span>
             </div>
-            <RouterLink v-if="store.runId && store.diff" :to="`/review/${store.runId}/diff`">
-              <NButton quaternary circle aria-label="打开 Diff">
-                <template #icon>
-                  <FileCode2 :size="16" />
+            <div class="finding-actions">
+              <NTooltip v-if="store.runId && store.report">
+                <template #trigger>
+                  <RouterLink :to="`/review/${store.runId}/report`">
+                    <NButton quaternary circle aria-label="打开审查报告">
+                      <template #icon>
+                        <FileText :size="16" />
+                      </template>
+                    </NButton>
+                  </RouterLink>
                 </template>
-              </NButton>
-            </RouterLink>
+                打开审查报告
+              </NTooltip>
+              <RouterLink v-if="store.runId && store.diff" :to="`/review/${store.runId}/diff`">
+                <NButton quaternary circle aria-label="打开 Diff">
+                  <template #icon>
+                    <FileCode2 :size="16" />
+                  </template>
+                </NButton>
+              </RouterLink>
+            </div>
           </header>
 
           <div class="finding-list scrollbar">
@@ -406,24 +433,37 @@ watch(
   min-width: 0;
 }
 
-.rail-section {
+.rail-utilities {
   border-top: 1px solid var(--color-border);
-  padding: var(--space-3);
+  padding: 0 var(--space-3);
 }
 
-.rail-section h2 {
+.finding-actions {
   align-items: center;
   display: flex;
-  font-size: 0.68rem;
+  gap: var(--space-1);
+}
+
+.utility-heading {
+  align-items: center;
+  display: flex;
+  font-size: 0.66rem;
   gap: var(--space-2);
-  margin: 0 0 var(--space-2);
   text-transform: uppercase;
 }
 
-.rail-section h2 > span {
+.utility-heading b {
   color: var(--color-subtle);
   font-family: var(--font-mono);
-  margin-left: auto;
+  font-weight: 500;
+}
+
+.rail-utilities :deep(.n-collapse-item__header) {
+  min-height: 2.5rem;
+}
+
+.rail-utilities :deep(.n-collapse-item__content-inner) {
+  padding: 0 0 var(--space-3);
 }
 
 .file-list,
@@ -467,6 +507,18 @@ watch(
 
 .recent-list a {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.recent-list {
+  max-height: calc(var(--space-4) * 10);
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+.recent-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .recent-list i {
