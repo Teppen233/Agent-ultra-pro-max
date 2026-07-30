@@ -273,6 +273,54 @@ class ReviewPlan(BaseModel):
     budget_seconds: int = Field(gt=0)
 
 
+ToolActorType = Literal["system", "agent"]
+ToolActivityStatus = Literal["started", "completed", "failed"]
+
+
+class ToolActivityData(BaseModel):
+    """前端可安全展示的真实工具活动摘要。"""
+
+    actor: str = Field(max_length=120)
+    actor_type: ToolActorType
+    tool_name: str = Field(max_length=120)
+    status: ToolActivityStatus
+    target: str = Field(default="", max_length=240)
+    summary: str = Field(default="", max_length=500)
+    duration_ms: int = Field(default=0, ge=0)
+    result_count: int | None = Field(default=None, ge=0)
+    context_id: str | None = Field(default=None, max_length=120)
+    agent_id: str | None = Field(default=None, max_length=160)
+
+
+class PlanPublishedData(BaseModel):
+    """TeamLead 计划可公开的风险、分片和预算摘要。"""
+
+    risk_tags: list[str] = Field(default_factory=list, max_length=32)
+    context_ids: list[str] = Field(default_factory=list, max_length=64)
+    shards: dict[str, list[str]] = Field(default_factory=dict)
+    budget_seconds: int = Field(gt=0)
+    summary: str = Field(max_length=500)
+
+
+PublicMailboxKind = Literal[
+    "candidate_finding",
+    "evidence_request",
+    "evidence_response",
+    "verifier_final",
+    "agent_review_completed",
+]
+
+
+class MailboxEventData(BaseModel):
+    """前端可展示但不冒充工具调用的 Mailbox 协作摘要。"""
+
+    sender: str = Field(max_length=160)
+    recipient: str = Field(max_length=160)
+    kind: PublicMailboxKind
+    correlation_id: str | None = Field(default=None, max_length=160)
+    summary: str = Field(max_length=500)
+
+
 MessageKind = Literal[
     "review_plan",
     "context_available",

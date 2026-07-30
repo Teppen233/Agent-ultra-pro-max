@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from collections import defaultdict
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -14,6 +15,9 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from reviewcrew.redaction import sanitize_persisted_value
+from reviewcrew.schemas import MailboxEventData, PlanPublishedData, ToolActivityData
 
 
 EventType = Literal[
@@ -28,6 +32,11 @@ EventType = Literal[
     "agent.candidate",
     "agent.completed",
     "agent.failed",
+    "plan.published",
+    "tool.started",
+    "tool.completed",
+    "tool.failed",
+    "mailbox.message",
     "verifier.started",
     "verifier.accepted",
     "verifier.rejected",
@@ -91,7 +100,7 @@ class EventStore:
                 sequence=self._sequences[run_id],
                 timestamp=datetime.now(UTC),
                 type=event_type,
-                data=data,
+                data=_public_event_data(event_type, data),
             )
             run_dir = self._run_dir(run_id)
             run_dir.mkdir(parents=True, exist_ok=True)
@@ -146,3 +155,78 @@ class EventStore:
             os.replace(reserved, claimed)
         except OSError as error:
             raise RuntimeError("运行已被其他审查任务认领") from error
+
+
+def _public_event_data(event_type: EventType, data: dict[str, Any]) -> dict[str, Any]:
+    """按事件类型冻结公开字段，并统一移除敏感结构。"""
+
+    sanitized = sanitize_persisted_value(data)
+    if event_type.startswith("tool."):
+        status = event_type.removeprefix("tool.")
+        clipped = _clip_mapping_strings(
+            sanitized,
+            {
+                "actor": 120,
+                "tool_name": 120,
+                "target": 240,
+                "summary": 500,
+                "context_id": 120,
+                "agent_id": 160,
+            },
+        )
+        return ToolActivityData.model_validate({**clipped, "status": status}).model_dump(mode="json")
+    if event_type == "plan.published":
+        clipped = _clip_mapping_strings(sanitized, {"summary": 500})
+        return PlanPublishedData.model_validate(clipped).model_dump(mode="json")
+    if event_type == "mailbox.message":
+        clipped = _clip_mapping_strings(
+            sanitized,
+            {
+                "sender": 160,
+                "recipient": 160,
+                "correlation_id": 160,
+                "summary": 500,
+            },
+        )
+        return MailboxEventData.model_validate(clipped).model_dump(mode="json")
+    return _remove_sensitive_keys(sanitized)
+
+
+def _remove_sensitive_keys(value: Any) -> Any:
+    """补充过滤密钥、令牌和授权字段，避免公开事件边界泄漏。"""
+
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if _is_secret_public_key(key):
+                continue
+            result[key] = _remove_sensitive_keys(item)
+        return result
+    if isinstance(value, list):
+        return [_remove_sensitive_keys(item) for item in value]
+    return value
+
+
+def _is_secret_public_key(key: str) -> bool:
+    """识别密钥、令牌、授权和推理字段的常见命名变体。"""
+
+    normalized = key.casefold()
+    tokens = {token for token in re.split(r"[^a-z0-9]+", normalized) if token}
+    if normalized in {"authorization", "secret", "password", "reasoning"}:
+        return True
+    if "token" in tokens or "secret" in tokens or "password" in tokens:
+        return True
+    if {"api", "key"} <= tokens:
+        return True
+    return normalized.startswith("reasoning")
+
+
+def _clip_mapping_strings(data: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
+    """按公开字段各自上限裁剪字符串，其他字段保持结构化值。"""
+
+    clipped = dict(data)
+    for key, limit in limits.items():
+        value = clipped.get(key)
+        if isinstance(value, str):
+            clipped[key] = " ".join(value.split())[:limit]
+    return clipped

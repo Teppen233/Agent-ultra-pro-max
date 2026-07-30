@@ -12,6 +12,7 @@ import httpx
 from reviewcrew.config import Config
 from reviewcrew.diff.parser import parse_unified_diff
 from reviewcrew.schemas import PRData, ReviewRequest
+from reviewcrew.tool_activity import ToolActivityPublisher
 
 
 _GITHUB_PR = re.compile(r"^https://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$")
@@ -21,17 +22,26 @@ class PRLoadError(RuntimeError):
     """表示 PR 元数据、仓库或 Git 引用无法加载。"""
 
 
-async def load_pr(request: ReviewRequest, config: Config) -> PRData:
+async def load_pr(
+    request: ReviewRequest,
+    config: Config,
+    *,
+    activity: ToolActivityPublisher | None = None,
+) -> PRData:
     """根据请求模式加载并标准化 PR 数据。"""
 
     if request.pr_url is not None:
-        return await _load_github(request.pr_url, config)
+        return await _load_github(request.pr_url, config, activity)
     if request.repo_path is not None:
-        return await _load_local(request, config)
+        return await _load_local(request, config, activity)
     raise PRLoadError("Replay 请求不包含可加载的 PR 数据")
 
 
-async def _load_github(pr_url: str, config: Config) -> PRData:
+async def _load_github(
+    pr_url: str,
+    config: Config,
+    activity: ToolActivityPublisher | None,
+) -> PRData:
     """通过 GitHub REST API 读取公开或授权 PR。"""
 
     match = _GITHUB_PR.match(pr_url)
@@ -43,6 +53,12 @@ async def _load_github(pr_url: str, config: Config) -> PRData:
     if token := config.github_token_value():
         headers["Authorization"] = f"Bearer {token}"
 
+    fetch_handle = None if activity is None else activity.started(
+        actor="pr_loader",
+        actor_type="system",
+        tool_name="github.load_pr",
+        target=f"{owner}/{repository}#{number}",
+    )
     try:
         async with httpx.AsyncClient(timeout=config.pr_load_timeout_seconds) as client:
             metadata_response = await client.get(endpoint, headers=headers)
@@ -52,10 +68,19 @@ async def _load_github(pr_url: str, config: Config) -> PRData:
             diff_response = await client.get(endpoint, headers=diff_headers)
             diff_response.raise_for_status()
     except httpx.HTTPError as error:
+        if fetch_handle is not None:
+            fetch_handle.fail("GitHub PR 拉取失败，未生成成功事件")
         raise PRLoadError(f"加载 GitHub PR 失败：{type(error).__name__}") from error
 
     metadata = metadata_response.json()
     raw_diff = diff_response.text
+    if fetch_handle is not None:
+        fetch_handle.complete("已拉取 PR 元数据和代码差异", result_count=2)
+    files = _parse_diff_with_activity(
+        raw_diff,
+        activity,
+        target=f"{owner}/{repository}#{number}",
+    )
     return PRData(
         provider="github",
         repository=f"{owner}/{repository}",
@@ -64,12 +89,16 @@ async def _load_github(pr_url: str, config: Config) -> PRData:
         base_sha=metadata["base"]["sha"],
         head_sha=metadata["head"]["sha"],
         author=(metadata.get("user") or {}).get("login"),
-        files=parse_unified_diff(raw_diff),
+        files=files,
         raw_diff=raw_diff,
     )
 
 
-async def _load_local(request: ReviewRequest, config: Config) -> PRData:
+async def _load_local(
+    request: ReviewRequest,
+    config: Config,
+    activity: ToolActivityPublisher | None,
+) -> PRData:
     """读取本地仓库两个已校验引用之间的差异。"""
 
     repo = Path(request.repo_path or "").resolve()
@@ -78,21 +107,37 @@ async def _load_local(request: ReviewRequest, config: Config) -> PRData:
     base_ref = request.base_ref or ""
     head_ref = request.head_ref or ""
 
+    load_handle = None if activity is None else activity.started(
+        actor="pr_loader",
+        actor_type="system",
+        tool_name="git.load_diff",
+        target=f"{repo.name}:{base_ref}...{head_ref}",
+    )
     try:
         base_sha, head_sha = await asyncio.gather(
             _git(repo, "rev-parse", "--verify", base_ref, timeout=config.pr_load_timeout_seconds),
             _git(repo, "rev-parse", "--verify", head_ref, timeout=config.pr_load_timeout_seconds),
         )
     except PRLoadError as error:
+        if load_handle is not None:
+            load_handle.fail("本地 Git 引用解析失败，未生成成功事件")
         raise PRLoadError("无法解析 Git 引用，请检查 base 和 head") from error
 
-    raw_diff = await _git(
-        repo,
-        "diff",
-        "--no-ext-diff",
-        f"{base_sha.strip()}...{head_sha.strip()}",
-        timeout=config.pr_load_timeout_seconds,
-    )
+    try:
+        raw_diff = await _git(
+            repo,
+            "diff",
+            "--no-ext-diff",
+            f"{base_sha.strip()}...{head_sha.strip()}",
+            timeout=config.pr_load_timeout_seconds,
+        )
+    except PRLoadError:
+        if load_handle is not None:
+            load_handle.fail("本地 Git 差异读取失败，未生成成功事件")
+        raise
+    if load_handle is not None:
+        load_handle.complete("已读取本地 base/head 代码差异")
+    files = _parse_diff_with_activity(raw_diff, activity, target=repo.name)
     return PRData(
         provider="local",
         repository=repo.name,
@@ -100,7 +145,7 @@ async def _load_local(request: ReviewRequest, config: Config) -> PRData:
         description="由本地 Git 引用生成",
         base_sha=base_sha.strip(),
         head_sha=head_sha.strip(),
-        files=parse_unified_diff(raw_diff),
+        files=files,
         raw_diff=raw_diff,
     )
 
@@ -129,3 +174,28 @@ async def _git(repo: Path, *arguments: str, timeout: float) -> str:
         summary = message[-1] if message else "未知 Git 错误"
         raise PRLoadError(f"Git 命令失败：{summary}")
     return result.stdout
+
+
+def _parse_diff_with_activity(
+    raw_diff: str,
+    activity: ToolActivityPublisher | None,
+    *,
+    target: str,
+):
+    """解析真实取得的 unified diff，并在成功后发布文件数摘要。"""
+
+    handle = None if activity is None else activity.started(
+        actor="diff_parser",
+        actor_type="system",
+        tool_name="diff.parse",
+        target=target,
+    )
+    try:
+        files = parse_unified_diff(raw_diff)
+    except Exception:
+        if handle is not None:
+            handle.fail("代码差异解析失败")
+        raise
+    if handle is not None:
+        handle.complete(f"解析 {len(files)} 个修改文件", result_count=len(files))
+    return files

@@ -42,6 +42,7 @@ from reviewcrew.schemas import (
 from reviewcrew.team.blackboard import EvidenceBlackboard
 from reviewcrew.team.mailbox import Mailbox
 from reviewcrew.team.publisher import MessagePublisher
+from reviewcrew.tool_activity import ToolActivityPublisher
 
 
 PRLoader = Callable[[ReviewRequest, Config], Awaitable[PRData]]
@@ -132,6 +133,7 @@ class _RunState:
     mailbox: Mailbox
     blackboard: EvidenceBlackboard
     publisher: MessagePublisher
+    tools: ToolActivityPublisher
     deadline_monotonic: float
     pr: PRData | None = None
     budget: ReviewBudget | None = None
@@ -164,6 +166,27 @@ class _EventingPublisher(MessagePublisher):
         kind = arguments["kind"]
         payload = arguments.get("payload", {})
         sender = arguments["sender"]
+        recipient = arguments["recipient"]
+        correlation_id = arguments.get("correlation_id")
+        public_kind = {
+            "candidate_finding": "candidate_finding",
+            "verification_request": "evidence_request",
+            "evidence_response": "evidence_response",
+            "verdict": "verifier_final",
+            "agent_review_completed": "agent_review_completed",
+        }.get(kind)
+        if public_kind is not None:
+            self._events.emit(
+                self.run_id,
+                "mailbox.message",
+                {
+                    "sender": sender,
+                    "recipient": recipient,
+                    "kind": public_kind,
+                    "correlation_id": correlation_id,
+                    "summary": self._mailbox_summary(kind, payload),
+                },
+            )
         if kind == "candidate_finding":
             finding = payload.get("finding", {})
             self._events.emit(
@@ -201,6 +224,33 @@ class _EventingPublisher(MessagePublisher):
                 }),
             )
         return True
+
+    @staticmethod
+    def _mailbox_summary(kind: str, payload: dict[str, Any]) -> str:
+        """只从结构化标识生成短摘要，不复述任意消息正文。"""
+
+        if kind == "candidate_finding":
+            finding = payload.get("finding", {})
+            return (
+                f"发布 {finding.get('severity') or '未知级别'} 候选 "
+                f"{finding.get('file') or '未知文件'}:{finding.get('line_start') or '?'}"
+            )
+        if kind == "verification_request":
+            return f"请求补充候选 {payload.get('finding_id') or '未知'} 的结构化证据"
+        if kind == "evidence_response":
+            evidence = payload.get("evidence", [])
+            return (
+                f"返回 {len(evidence) if isinstance(evidence, list) else 0} 条补充证据，"
+                f"结论为 {payload.get('conclusion') or 'unknown'}"
+            )
+        if kind == "verdict":
+            verdict = payload.get("verdict", {})
+            outcome = "接受" if verdict.get("accepted") else "拒绝"
+            return f"{outcome}候选 {verdict.get('finding_id') or '未知'}"
+        return (
+            f"专家 {payload.get('agent_id') or '未知'} 已完成上下文 "
+            f"{payload.get('context_id') or '未知'} 的审查"
+        )
 
 
 class Orchestrator:
@@ -283,8 +333,17 @@ class Orchestrator:
         mailbox = Mailbox(self.config.runs_dir, run_id)
         blackboard = EvidenceBlackboard(run_id)
         publisher = _EventingPublisher(mailbox=mailbox, blackboard=blackboard, events=self._events)
+        tools = ToolActivityPublisher(self._events, run_id)
         deadline_monotonic = time.monotonic() + self._global_timeout
-        state = _RunState(run_id, started_at, mailbox, blackboard, publisher, deadline_monotonic)
+        state = _RunState(
+            run_id=run_id,
+            started_at=started_at,
+            mailbox=mailbox,
+            blackboard=blackboard,
+            publisher=publisher,
+            tools=tools,
+            deadline_monotonic=deadline_monotonic,
+        )
         started_data = {"mode": self._request_mode(request)}
         if request.repo_path is not None:
             started_data.update(
@@ -486,6 +545,12 @@ class Orchestrator:
         """在隔离目录运行持久化器，成功后才将产物提升到正式目录。"""
 
         staging_root = Path(self.config.runs_dir) / f".report-staging-{state.run_id}-{uuid4().hex}"
+        activity = state.tools.started(
+            actor="reporter",
+            actor_type="system",
+            tool_name="report.persist",
+            target=state.run_id,
+        )
         try:
             await self._run_sync_until(
                 deadline_monotonic,
@@ -495,6 +560,15 @@ class Orchestrator:
                 staging_root,
                 Path(self.config.runs_dir),
                 state.run_id,
+            )
+        except Exception:
+            activity.fail("报告持久化失败，未发布成功事件")
+            raise
+        else:
+            finding_count = len(result.findings)
+            activity.complete(
+                f"已保存 JSON 和 Markdown 报告，共 {finding_count} 个 Finding",
+                result_count=finding_count,
             )
         finally:
             if staging_root.exists():
@@ -518,6 +592,13 @@ class Orchestrator:
     ) -> bool:
         """在绝对截止时间内使用内置原子持久化器保存 partial 快照。"""
 
+        activity = ToolActivityPublisher(self._events, result.run_id).started(
+            actor="reporter",
+            actor_type="system",
+            tool_name="report.persist",
+            target=result.run_id,
+            summary="保存部分审查快照",
+        )
         try:
             await self._run_sync_until(
                 deadline_monotonic,
@@ -526,7 +607,12 @@ class Orchestrator:
                 self.config.runs_dir,
             )
         except (TimeoutError, RuntimeError):
+            activity.fail("部分报告持久化失败，未发布成功事件")
             return False
+        activity.complete(
+            f"已保存部分审查快照，共 {len(result.findings)} 个 Finding",
+            result_count=len(result.findings),
+        )
         return True
 
     async def _emit_events_until(
@@ -554,7 +640,12 @@ class Orchestrator:
         state.pr = await self._run_stage(
             state,
             "loading_pr",
-            lambda: self._pr_loader(request, self.config),
+            lambda: self._call_with_supported_keywords(
+                self._pr_loader,
+                request,
+                self.config,
+                activity=state.tools,
+            ),
         )
         state.budget = ReviewBudget.from_pr(
             state.pr,
@@ -564,7 +655,7 @@ class Orchestrator:
         state.contexts = await self._run_stage(
             state,
             "building_context",
-            lambda: self._call_context_builder(state.pr, request),
+            lambda: self._call_context_builder(state.pr, request, state.tools),
         )
         for context in state.contexts:
             await state.publisher.publish(
@@ -579,6 +670,11 @@ class Orchestrator:
             state,
             "planning",
             lambda: self._team_lead.plan(state.pr, state.contexts, planning_budget),
+        )
+        self._events.emit(
+            state.run_id,
+            "plan.published",
+            state.plan.model_dump(mode="json"),
         )
         await state.publisher.publish(
             sender="team_lead",
@@ -691,7 +787,16 @@ class Orchestrator:
         semaphore: asyncio.Semaphore,
     ) -> AgentSnapshot | None:
         agent_id = f"{role}:{context.id}"
-        self._events.emit(state.run_id, "agent.started", {"agent": agent_id, "role": role})
+        self._events.emit(
+            state.run_id,
+            "agent.started",
+            {
+                "agent": agent_id,
+                "role": role,
+                "context_id": context.id,
+                "files": context.files,
+            },
+        )
         agent = factory(state.publisher)
         budget = Budget(seconds=self._stage_budget_seconds(state, "team_review"))
         try:
@@ -947,6 +1052,7 @@ class Orchestrator:
         self,
         pr: PRData,
         request: ReviewRequest,
+        activity: ToolActivityPublisher,
     ) -> list[ContextPack]:
         return await self._call_with_supported_keywords(
             self._context_builder,
@@ -955,6 +1061,7 @@ class Orchestrator:
             self.config,
             request=request,
             config=self.config,
+            activity=activity,
         )
 
     async def _default_context_builder(
@@ -962,9 +1069,31 @@ class Orchestrator:
         pr: PRData,
         request: ReviewRequest,
         config: Config,
+        activity: ToolActivityPublisher | None = None,
     ) -> list[ContextPack]:
         if request.repo_path is not None:
-            return await build_context(pr, Path(request.repo_path).resolve(), config)
+            return await build_context(
+                pr,
+                Path(request.repo_path).resolve(),
+                config,
+                activity=activity,
+            )
+        if activity is not None:
+            target = pr.repository
+            for tool_name, capability in (
+                ("context.read_docs", "项目文档读取"),
+                ("context.read_file", "文件范围读取"),
+                ("context.find_tests", "相关测试检索"),
+                ("context.search_symbol", "符号引用检索"),
+                ("static.semgrep", "Semgrep 静态扫描"),
+            ):
+                activity.degraded(
+                    actor="context_builder",
+                    actor_type="system",
+                    tool_name=tool_name,
+                    target=target,
+                    summary=f"GitHub 模式未配置本地仓库，{capability}已降级",
+                )
         return [
             ContextPack(
                 id=f"ctx-{index}",

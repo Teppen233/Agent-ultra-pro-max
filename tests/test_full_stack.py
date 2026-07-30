@@ -38,6 +38,11 @@ FRONTEND_EVENT_TYPES = {
     "agent.candidate",
     "agent.completed",
     "agent.failed",
+    "plan.published",
+    "tool.started",
+    "tool.completed",
+    "tool.failed",
+    "mailbox.message",
     "verifier.started",
     "verifier.accepted",
     "verifier.rejected",
@@ -244,7 +249,7 @@ def test_post_fake_orchestrator_sse_result_report_and_replay_match_frontend_cont
         result = client.get(f"/api/reviews/{run_id}")
         json_report = client.get(f"/api/reviews/{run_id}/report?format=json")
         markdown_report = client.get(f"/api/reviews/{run_id}/report?format=markdown")
-        replay = client.get(f"/api/replays/{run_id}/events?speed=1000000")
+        replay = client.get(f"/api/replays/{run_id}/events?speed=8")
 
     live_events = _parse_sse(live.text)
     replay_events = _parse_sse(replay.text)
@@ -265,6 +270,29 @@ def test_post_fake_orchestrator_sse_result_report_and_replay_match_frontend_cont
     }
     assert live_events[-1]["type"] == "review.completed"
     assert live_events[-1]["data"] == {"status": "completed"}
+    plan = next(event for event in live_events if event["type"] == "plan.published")
+    assert plan["data"]["summary"] == "离线全链路契约验证"
+    assert plan["data"]["context_ids"]
+    tool_names = {
+        event["data"]["tool_name"]
+        for event in live_events
+        if str(event["type"]).startswith("tool.")
+    }
+    assert {
+        "git.load_diff",
+        "diff.parse",
+        "context.read_docs",
+        "context.read_file",
+        "context.find_tests",
+        "static.semgrep",
+        "report.persist",
+    } <= tool_names
+    mailbox = next(event for event in live_events if event["type"] == "mailbox.message")
+    assert mailbox["data"]["kind"] == "candidate_finding"
+    assert "tool_name" not in mailbox["data"]
+    serialized_events = json.dumps(live_events, ensure_ascii=False).casefold()
+    for forbidden in ("prompt", "reasoning", "api_key", "raw_response"):
+        assert forbidden not in serialized_events
     candidate = next(event for event in live_events if event["type"] == "agent.candidate")
     assert str(candidate["data"]["agent"]).startswith("defect:ctx-")
     assert {key: value for key, value in candidate["data"].items() if key != "agent"} == {

@@ -31,6 +31,7 @@ from reviewcrew.schemas import (
     Verdict,
 )
 from reviewcrew.team.publisher import MessagePublisher
+from reviewcrew.tool_activity import ToolActivityPublisher
 
 
 def slow_picklable_report_renderer(result: ReviewResult) -> str:
@@ -343,6 +344,37 @@ async def test_review_streams_first_candidate_before_experts_finish_and_persists
     events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()]
     assert events[-2]["type"] == "report.generated"
     assert events[-1]["type"] == "review.completed"
+    plan_event = next(item for item in events if item["type"] == "plan.published")
+    assert plan_event["data"] == {
+        "risk_tags": [],
+        "context_ids": ["ctx-auth"],
+        "shards": {"defect": ["ctx-auth"], "intent": ["ctx-auth"]},
+        "budget_seconds": plan_event["data"]["budget_seconds"],
+        "summary": "并行审查",
+    }
+    assert plan_event["data"]["budget_seconds"] > 0
+    mailbox_event = next(
+        item
+        for item in events
+        if item["type"] == "mailbox.message" and item["data"]["kind"] == "candidate_finding"
+    )
+    assert mailbox_event["data"] == {
+        "sender": "defect:ctx-auth",
+        "recipient": "verifier",
+        "kind": "candidate_finding",
+        "correlation_id": "finding-defect",
+        "summary": "发布 high 候选 src/auth.py:10",
+    }
+    report_activities = [
+        item["type"]
+        for item in events
+        if item["data"].get("tool_name") == "report.persist"
+    ]
+    assert report_activities == ["tool.started", "tool.completed"]
+    assert all(
+        item["data"].get("tool_name") != "mailbox.candidate_finding"
+        for item in events
+    )
     for stage in ("loading_pr", "building_context", "planning", "team_review", "reporting"):
         stage_events = [item["type"] for item in events if item["data"].get("stage") == stage]
         assert stage_events == ["stage.started", "stage.completed"]
@@ -356,6 +388,39 @@ async def test_review_streams_first_candidate_before_experts_finish_and_persists
     )
     for forbidden in ("reasoning_summary", "Prompt", "响应", "思维链"):
         assert forbidden not in run_text
+
+
+@pytest.mark.asyncio
+async def test_github_mode_without_local_repo_emits_only_explicit_context_degradations(
+    tmp_path: Path,
+) -> None:
+    """GitHub 模式没有本地仓库时不能伪造读取、检索或扫描成功。"""
+
+    store = EventStore(tmp_path / "runs")
+    run_id = store.create_run()
+    orchestrator = Orchestrator(Config(runs_dir=tmp_path / "runs"), event_store=store)
+    activity = ToolActivityPublisher(store, run_id)
+
+    contexts = await orchestrator._default_context_builder(
+        make_pr(file_count=1, changed_lines=1).model_copy(update={"provider": "github"}),
+        ReviewRequest(pr_url="https://github.com/acme/demo/pull/7"),
+        Config(runs_dir=tmp_path / "runs"),
+        activity,
+    )
+
+    events = store.read(run_id)
+    assert contexts[0].retrieval_notes == ["GitHub 模式仅使用 PR 差异构建基础上下文。"]
+    assert [event.type for event in events] == ["tool.failed"] * 5
+    assert {
+        event.data["tool_name"] for event in events
+    } == {
+        "context.read_docs",
+        "context.read_file",
+        "context.find_tests",
+        "context.search_symbol",
+        "static.semgrep",
+    }
+    assert all("未配置本地仓库" in event.data["summary"] for event in events)
 
 
 class EmptyVerifier:

@@ -7,8 +7,10 @@ import httpx
 import pytest
 
 from reviewcrew.config import Config
+from reviewcrew.events import EventStore
 from reviewcrew.github.pr_loader import PRLoadError, load_pr
 from reviewcrew.schemas import ReviewRequest
+from reviewcrew.tool_activity import ToolActivityPublisher
 
 
 SIMPLE_DIFF = """diff --git a/app.py b/app.py
@@ -49,6 +51,47 @@ async def test_load_github_pr_returns_pr_data(respx_mock) -> None:
     assert result.repository == "acme/demo"
     assert result.head_sha == "head123"
     assert result.files[0].path == "app.py"
+
+
+@pytest.mark.asyncio
+async def test_load_github_pr_publishes_real_fetch_and_diff_parse_activities(
+    tmp_path: Path,
+    respx_mock,
+) -> None:
+    """GitHub 模式只在请求和 Diff 解析真实完成后发布对应成功事件。"""
+
+    endpoint = "https://api.github.com/repos/acme/demo/pulls/7"
+    route = respx_mock.get(endpoint)
+    route.side_effect = [
+        httpx.Response(
+            200,
+            json={
+                "title": "更新配置",
+                "body": "修正默认值",
+                "user": {"login": "alice"},
+                "base": {"sha": "base123"},
+                "head": {"sha": "head123"},
+            },
+        ),
+        httpx.Response(200, text=SIMPLE_DIFF),
+    ]
+    store = EventStore(tmp_path / "runs")
+    run_id = store.create_run()
+
+    await load_pr(
+        ReviewRequest(pr_url="https://github.com/acme/demo/pull/7"),
+        Config(),
+        activity=ToolActivityPublisher(store, run_id),
+    )
+
+    events = store.read(run_id)
+    completed = [
+        event.data["tool_name"]
+        for event in events
+        if event.type == "tool.completed"
+    ]
+    assert completed == ["github.load_pr", "diff.parse"]
+    assert not any(event.data["tool_name"] == "git.load_diff" for event in events)
 
 
 @pytest.mark.asyncio
