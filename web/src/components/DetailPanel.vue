@@ -37,7 +37,7 @@ defineProps<{
   title: string
   findings: Array<{
     finding: any
-    verifierStatus: string
+    verifierStatus: 'pending' | 'accepted' | 'rejected'
     verifierReason?: string
   }>
 }>()

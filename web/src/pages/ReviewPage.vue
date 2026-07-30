@@ -54,8 +54,6 @@
     />
   </div>
 </template>
-  </div>
-</template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
@@ -74,7 +72,7 @@ const sseError = ref<string | null>(null)
 // 详情面板
 const panelVisible = ref(false)
 const panelTitle = ref('')
-const panelFindings = ref<Array<{ finding: any; verifierStatus: string; verifierReason?: string }>>([])
+const panelFindings = ref<Array<{ finding: any; verifierStatus: 'pending' | 'accepted' | 'rejected'; verifierReason?: string }>>([])
 
 function openDetail(node: { id: string; type: string; label: string }) {
   panelTitle.value = node.label
@@ -191,21 +189,6 @@ function formatTime(secs: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-// 汇总所有工具调用（带 agent 标记）
-const allTools = computed(() => {
-  const result: Array<{ agent: string; tool: string; durationMs?: number }> = []
-  for (const agent of store.agents) {
-    for (const t of agent.tools) {
-      result.push({ agent: agent.key, tool: t.tool, durationMs: t.durationMs })
-    }
-  }
-  return result
-})
-
-function getAgentName(key: string): string {
-  const agent = store.agents.find((a) => a.key === key)
-  return agent?.name ?? key
-}
 </script>
 
 <style scoped>

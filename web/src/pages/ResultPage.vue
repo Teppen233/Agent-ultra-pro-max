@@ -124,7 +124,7 @@ const error = ref<string | null>(null)
 const selectedRun = ref<string | null>(null)
 const detailLoading = ref(false)
 const detailError = ref<string | null>(null)
-const detailFindings = ref<Array<{ finding: any; verifierStatus: string; verifierReason?: string }>>([])
+const detailFindings = ref<Array<{ finding: any; verifierStatus: 'pending' | 'accepted' | 'rejected'; verifierReason?: string }>>([])
 
 const totalFindings = computed(() => summaries.value.reduce((s, r) => s + r.finding_count, 0))
 const avgTime = computed(() => {
@@ -169,8 +169,8 @@ async function viewDetail(runId: string) {
     )
     detailFindings.value = store.candidates.map(c => ({
       finding: c.finding,
-      verifierStatus: acceptedIds.has(c.finding.id) ? 'accepted'
-        : rejectedIds.has(c.finding.id) ? 'rejected' : 'pending',
+      verifierStatus: (acceptedIds.has(c.finding.id) ? 'accepted'
+        : rejectedIds.has(c.finding.id) ? 'rejected' : 'pending') as 'accepted' | 'rejected' | 'pending',
       verifierReason: '',
     }))
   } catch (e) {
