@@ -46,4 +46,17 @@ describe('ReviewForm', () => {
       ['https://github.com/owner/repo/pull/42', '', true],
     ])
   })
+
+  it('disables benchmark opt-in when all five slots are occupied', async () => {
+    const wrapper = mount(ReviewForm, {
+      props: { loading: false, benchmarkCount: 5, benchmarkCapacity: 5 },
+    })
+    await wrapper
+      .get('[aria-label="GitHub PR URL 或本地 Diff 路径"] input')
+      .setValue('https://github.com/owner/repo/pull/42')
+
+    const checkbox = wrapper.get('[aria-label="加入 Benchmark"]')
+    expect(checkbox.classes()).toContain('n-checkbox--disabled')
+    expect(wrapper.text()).toContain('5 / 5')
+  })
 })

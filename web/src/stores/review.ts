@@ -356,7 +356,7 @@ export const useReviewStore = defineStore('review', {
         if (!response.ok) throw new Error(await responseError(response, '审查任务启动失败'))
         const payload = (await response.json()) as { run_id: string }
         this.runId = payload.run_id
-        if (addToBenchmark) this.benchmarkCount += 1
+        if (addToBenchmark) await this.loadBenchmarkCapacity()
         this.connectLive(payload.run_id)
         return payload.run_id
       } catch (error: unknown) {

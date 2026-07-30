@@ -80,6 +80,50 @@ describe('review workflow reducer', () => {
     }
   })
 
+  it('opts into benchmark and refreshes capacity from the server', async () => {
+    class FakeEventSource {
+      onerror: (() => void) | null = null
+
+      addEventListener() {}
+
+      close() {}
+    }
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ run_id: 'run-benchmark' }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ capacity: 5, count: 4, entries: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const store = useReviewStore()
+
+    try {
+      await store.startReview('https://github.com/owner/repo/pull/42', '', true)
+
+      const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+      expect(JSON.parse(String(request?.body))).toEqual({
+        pr_url: 'https://github.com/owner/repo/pull/42',
+        repo_path: null,
+        add_to_benchmark: true,
+      })
+      expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/benchmark/entries')
+      expect([store.benchmarkCount, store.benchmarkCapacity]).toEqual([4, 5])
+    } finally {
+      store.stopSource()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('rebuilds deterministic state when stepping and seeking', () => {
     const store = useReviewStore()
     store.setReplaySource(demoEvents, true)

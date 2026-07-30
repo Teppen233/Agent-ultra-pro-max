@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Play, WandSparkles } from 'lucide-vue-next'
-import { NButton, NCheckbox, NInput } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NTooltip } from 'naive-ui'
 import { ref } from 'vue'
 
 const props = defineProps<{
@@ -38,12 +38,20 @@ function submit() {
       clearable
     />
     <div class="benchmark-option">
-      <NCheckbox
-        v-model:checked="addToBenchmark"
-        :disabled="!isGithubPr(prUrl) || (props.benchmarkCount ?? 0) >= (props.benchmarkCapacity ?? 5)"
-      >
-        加入 Benchmark
-      </NCheckbox>
+      <NTooltip>
+        <template #trigger>
+          <NCheckbox
+            v-model:checked="addToBenchmark"
+            aria-label="加入 Benchmark"
+            :disabled="!isGithubPr(prUrl) || (props.benchmarkCount ?? 0) >= (props.benchmarkCapacity ?? 5)"
+          >
+            加入 Benchmark
+          </NCheckbox>
+        </template>
+        {{ (props.benchmarkCount ?? 0) >= (props.benchmarkCapacity ?? 5)
+          ? 'Benchmark 已满，请先保留当前 5 个仓库'
+          : '审计成功后保存当前结果，不会重复运行' }}
+      </NTooltip>
       <span class="benchmark-capacity">{{ props.benchmarkCount ?? 0 }} / {{ props.benchmarkCapacity ?? 5 }}</span>
     </div>
     <NButton attr-type="submit" type="primary" :loading="loading" :disabled="!prUrl.trim()">
@@ -76,7 +84,18 @@ function submit() {
 }
 
 .benchmark-capacity {
-  color: var(--text-muted);
+  color: var(--color-muted);
   font-size: 0.75rem;
+}
+
+@media (max-width: 1450px) {
+  .review-form {
+    grid-template-columns: minmax(14rem, 1.45fr) minmax(12rem, 1fr) auto auto;
+  }
+
+  .benchmark-option {
+    grid-column: 1 / 3;
+    grid-row: 2;
+  }
 }
 </style>
