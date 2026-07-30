@@ -115,7 +115,7 @@ async def start_review(request: ReviewRequest):
 
 @app.get("/api/reviews/{run_id}")
 async def get_review_status(run_id: str):
-    """查询审查运行的状态。"""
+    """查询审查运行的状态（含事件和结果）。"""
     store = _get_store()
     events = store.read(run_id)
     if not events:
@@ -135,10 +135,27 @@ async def get_review_status(run_id: str):
     else:
         status = "running"
 
+    # 读取 result.json 获取 findings
+    run_dir = Path(_config.runs_dir if _config else "runs") / run_id
+    findings: list[dict] = []
+    result_file = run_dir / "result.json"
+    if result_file.exists():
+        try:
+            result_data = json.loads(result_file.read_text(encoding="utf-8"))
+            findings = result_data.get("findings", [])
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # 序列化事件为 dict 列表
+    events_data = [e.model_dump(mode="json") for e in events]
+
     return {
         "run_id": run_id,
         "status": status,
         "event_count": len(events),
+        "events": events_data,
+        "findings": findings,
+        "report_url": f"/api/reviews/{run_id}/report",
     }
 
 
