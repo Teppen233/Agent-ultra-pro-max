@@ -1,0 +1,145 @@
+<script setup lang="ts">
+import { Search, Terminal } from 'lucide-vue-next'
+import { computed, nextTick, ref, watch } from 'vue'
+
+import type { PipelineEvent } from '@/types'
+
+const props = defineProps<{ events: PipelineEvent[] }>()
+const stream = ref<HTMLElement | null>(null)
+const visible = computed(() =>
+  props.events.filter((event) => event.type === 'thought' || event.type === 'tool').slice(-30),
+)
+
+const agentNames = {
+  coordinator: '协调器',
+  defect: '缺陷专家',
+  intent: '意图专家',
+  verifier: 'Verifier',
+} as const
+
+watch(
+  () => props.events.length,
+  async () => {
+    await nextTick()
+    if (stream.value) stream.value.scrollTop = stream.value.scrollHeight
+  },
+)
+</script>
+
+<template>
+  <section class="thoughts">
+    <header><Terminal :size="14" /> Agent 实时事件</header>
+    <div ref="stream" class="thought-list scrollbar" aria-live="polite">
+      <div v-if="visible.length === 0" class="thought-empty">
+        等待 Agent 推理或工具调用
+      </div>
+      <article v-for="(event, index) in visible" :key="`${event.timestamp}-${index}`" :class="event.type">
+        <template v-if="event.type === 'tool'">
+          <Search :size="14" />
+          <div>
+            <strong>{{ agentNames[event.agent] }} / {{ event.tool }}</strong>
+            <code>{{ JSON.stringify(event.args ?? {}) }}</code>
+          </div>
+        </template>
+        <template v-else-if="event.type === 'thought'">
+          <span class="thought-agent">{{ agentNames[event.agent].slice(0, 1) }}</span>
+          <p><b>{{ agentNames[event.agent] }}</b>{{ event.text }}</p>
+        </template>
+      </article>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.thoughts {
+  border-top: 1px solid var(--color-border);
+  min-height: 14rem;
+}
+
+.thoughts header {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted);
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: 0.69rem;
+  gap: var(--space-2);
+  height: 2.5rem;
+  padding: 0 var(--space-4);
+  text-transform: uppercase;
+}
+
+.thought-list {
+  height: 15rem;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+}
+
+.thought-list article {
+  align-items: flex-start;
+  display: flex;
+  font-size: 0.78rem;
+  gap: var(--space-2);
+  line-height: 1.55;
+  margin-bottom: var(--space-3);
+}
+
+.thought-list article.tool {
+  background: var(--color-surface-raised);
+  border-left: 2px solid var(--color-blue);
+  border-radius: var(--radius-sm);
+  color: var(--color-blue);
+  padding: var(--space-2);
+}
+
+.tool strong {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.tool code {
+  color: var(--color-muted);
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.67rem;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.thought-agent {
+  align-items: center;
+  background: var(--color-violet);
+  border-radius: var(--radius-sm);
+  color: var(--color-bg);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  height: 1.25rem;
+  justify-content: center;
+  width: 1.25rem;
+}
+
+.thought-list p {
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.thought-list p b {
+  color: var(--color-text);
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 500;
+  margin-bottom: var(--space-1);
+}
+
+.thought-empty {
+  color: var(--color-subtle);
+  font-size: 0.78rem;
+  padding: var(--space-6) 0;
+  text-align: center;
+}
+</style>
