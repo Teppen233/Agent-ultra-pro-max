@@ -138,6 +138,48 @@ describe('API Client', () => {
     await expect(fetchLatestBenchmark()).rejects.toThrow('评测摘要格式无效。')
   })
 
+  it('拒绝缺少逐仓状态与统计字段的 Benchmark 摘要', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      mode: 'quick', runner: 'real', offline: false, selected_cases: 1, completed_cases: 1,
+      actually_run_ready_cases: 1, caught_cases: 0, real_catch_rate: 0,
+      observed_offline_catch_rate: null, offline_results_excluded_from_real_rate: false,
+      false_positive_count: 0, verifier_accepted_count: 0, verifier_rejected_count: 0,
+      needs_human_review_cases: 0, timed_out_cases: 0, elapsed_seconds: 10,
+      repositories: [{ repository: 'sentry', language: 'Python' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetcher)
+
+    await expect(fetchLatestBenchmark()).rejects.toThrow('评测摘要格式无效。')
+  })
+
+  it('拒绝缺少 Judge 完整判定字段的逐案例 Benchmark 摘要', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      mode: 'case', runner: 'real', offline: false, selected_cases: 1, completed_cases: 1,
+      actually_run_ready_cases: 1, caught_cases: 1, real_catch_rate: 1,
+      observed_offline_catch_rate: null, offline_results_excluded_from_real_rate: false,
+      false_positive_count: 0, verifier_accepted_count: 1, verifier_rejected_count: 0,
+      needs_human_review_cases: 0, timed_out_cases: 0, elapsed_seconds: 10,
+      repositories: [{
+        repository: 'sentry', language: 'Python', total_cases: 1, verified_cases: 1, executed_cases: 1,
+        target_caught: 1, other_findings: 0, rejected_count: 0, elapsed_seconds: 10,
+        status: 'completed', latest_run_id: 'run-20260730-012450-d90a1b5b', catch_rate: 1,
+        observed_offline_catch_rate: null,
+        cases: [{
+          case_id: 'sentry-01', project: 'sentry', language: 'Python', status: 'completed',
+          elapsed_seconds: 10, timed_out: false, run_id: 'run-20260730-012450-d90a1b5b',
+          judge: {
+            caught: true, matched_finding_id: 'finding-1', location_match: true,
+            used_line_tolerance: 0, needs_human_review: false, reason: '命中',
+            false_positive_count: 0, verifier_accepted_count: 1, verifier_rejected_count: 0,
+          },
+        }],
+      }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetcher)
+
+    await expect(fetchLatestBenchmark()).rejects.toThrow('评测摘要格式无效。')
+  })
+
   it('轮询运行中状态，只有完整终态才返回 ReviewResult', async () => {
     const payloads = [
       { run_id: 'run-123', status: 'running' },

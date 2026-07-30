@@ -2,6 +2,7 @@ import type {
   BenchmarkSummary,
   EventType,
   PipelineEvent,
+  RepositoryBenchmarkStatus,
   ReviewRequest,
   ReviewResponse,
   ReviewResult,
@@ -151,6 +152,58 @@ const asBenchmarkSummary = (value: unknown): BenchmarkSummary => {
     typeof payload[field] === 'number' && Number.isInteger(payload[field]) && (payload[field] as number) >= 0)
   const validRate = (rate: unknown): boolean =>
     rate === null || (typeof rate === 'number' && Number.isFinite(rate) && rate >= 0 && rate <= 1)
+  const validNonNegativeInteger = (field: unknown): boolean =>
+    typeof field === 'number' && Number.isInteger(field) && field >= 0
+  const validElapsed = (field: unknown): boolean =>
+    typeof field === 'number' && Number.isFinite(field) && field >= 0
+  const repositoryStatuses = new Set<RepositoryBenchmarkStatus>([
+    'needs_data', 'pending', 'running', 'completed', 'partial', 'failed',
+  ])
+  const validCase = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const item = value as Record<string, unknown>
+    const judge = item.judge
+    if (!judge || typeof judge !== 'object' || Array.isArray(judge)) return false
+    const decision = judge as Record<string, unknown>
+    return typeof item.case_id === 'string'
+      && typeof item.project === 'string'
+      && typeof item.language === 'string'
+      && typeof item.status === 'string'
+      && ['completed', 'partial', 'failed'].includes(item.status)
+      && validElapsed(item.elapsed_seconds)
+      && typeof item.timed_out === 'boolean'
+      && (typeof item.run_id === 'string' || item.run_id === null)
+      && typeof decision.caught === 'boolean'
+      && (typeof decision.matched_finding_id === 'string' || decision.matched_finding_id === null)
+      && typeof decision.location_match === 'boolean'
+      && typeof decision.semantic_match === 'boolean'
+      && (decision.used_line_tolerance === null || (
+        typeof decision.used_line_tolerance === 'number' && Number.isInteger(decision.used_line_tolerance)
+      ))
+      && typeof decision.needs_human_review === 'boolean'
+      && typeof decision.reason === 'string'
+      && validNonNegativeInteger(decision.false_positive_count)
+      && validNonNegativeInteger(decision.verifier_accepted_count)
+      && validNonNegativeInteger(decision.verifier_rejected_count)
+  }
+  const validRepository = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const repository = value as Record<string, unknown>
+    const countFields = [
+      'total_cases', 'verified_cases', 'executed_cases', 'target_caught', 'other_findings', 'rejected_count',
+    ]
+    return typeof repository.repository === 'string'
+      && typeof repository.language === 'string'
+      && countFields.every((field) => validNonNegativeInteger(repository[field]))
+      && validElapsed(repository.elapsed_seconds)
+      && typeof repository.status === 'string'
+      && repositoryStatuses.has(repository.status as RepositoryBenchmarkStatus)
+      && (typeof repository.latest_run_id === 'string' || repository.latest_run_id === null)
+      && validRate(repository.catch_rate)
+      && validRate(repository.observed_offline_catch_rate)
+      && Array.isArray(repository.cases)
+      && repository.cases.every(validCase)
+  }
   if (
     typeof payload.mode !== 'string'
     || !['quick', 'case', 'full'].includes(payload.mode)
@@ -164,6 +217,8 @@ const asBenchmarkSummary = (value: unknown): BenchmarkSummary => {
     || typeof payload.elapsed_seconds !== 'number'
     || !Number.isFinite(payload.elapsed_seconds)
     || payload.elapsed_seconds < 0
+    || !Array.isArray(payload.repositories)
+    || !payload.repositories.every(validRepository)
   ) {
     throw new Error('评测摘要格式无效。')
   }

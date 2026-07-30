@@ -145,6 +145,55 @@ export interface RunsResponse {
   offset: number
 }
 
+export type RepositoryBenchmarkStatus =
+  | 'needs_data'
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+
+export interface BenchmarkCaseJudge {
+  caught: boolean
+  matched_finding_id: string | null
+  location_match: boolean
+  semantic_match: boolean
+  used_line_tolerance: number | null
+  needs_human_review: boolean
+  reason: string
+  false_positive_count: number
+  verifier_accepted_count: number
+  verifier_rejected_count: number
+}
+
+export interface BenchmarkCaseReport {
+  case_id: string
+  project: string
+  language: string
+  status: 'completed' | 'partial' | 'failed'
+  elapsed_seconds: number
+  timed_out: boolean
+  run_id: string | null
+  judge: BenchmarkCaseJudge
+}
+
+export interface RepositoryBenchmarkSummary {
+  repository: string
+  language: string
+  total_cases: number
+  verified_cases: number
+  executed_cases: number
+  target_caught: number
+  other_findings: number
+  rejected_count: number
+  elapsed_seconds: number
+  status: RepositoryBenchmarkStatus
+  latest_run_id: string | null
+  catch_rate: number | null
+  observed_offline_catch_rate: number | null
+  cases: BenchmarkCaseReport[]
+}
+
 export interface BenchmarkSummary {
   mode: 'quick' | 'case' | 'full'
   runner: 'fake' | 'real'
@@ -162,4 +211,5 @@ export interface BenchmarkSummary {
   needs_human_review_cases: number
   timed_out_cases: number
   elapsed_seconds: number
+  repositories: RepositoryBenchmarkSummary[]
 }
