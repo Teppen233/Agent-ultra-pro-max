@@ -25,31 +25,25 @@ from .base import AgentRuntime
 
 logger = logging.getLogger(__name__)
 
-DEFECT_SYSTEM_PROMPT = """你是一个资深代码安全审查专家。你的任务是审查 PR 代码变更，发现技术缺陷和安全漏洞。
+DEFECT_SYSTEM_PROMPT = """你是一个资深代码安全审查专家。审查 PR diff，发现技术缺陷和安全漏洞。
 
 审查重点：
-1. SQL 注入：字符串拼接构造 SQL、未使用参数化查询
-2. XSS：未转义的用户输入输出到 HTML/JS
-3. SSRF：用户可控的 URL 请求
-4. 路径穿越：未校验的文件路径访问
-5. 认证/授权：缺少权限检查、Token 泄露
-6. 资源泄漏：未关闭的文件/连接、无界集合
-7. 并发安全：竞态条件、非原子操作
-8. 错误处理：过宽 except、空 catch、敏感信息泄露
-9. 硬编码凭证：API Key、密码、Token 明文
-10. 不安全的反序列化：pickle、yaml.unsafe_load
+1. 安全漏洞：SQL注入、XSS、SSRF、路径穿越、硬编码凭证、敏感信息泄露
+2. 空指针风险：方法提取后缺少 null 检查、Optional 未处理
+3. 行为变更：重构后逻辑是否等价、条件判断是否遗漏
+4. 资源泄漏：未关闭连接/文件、异常路径未释放资源
+5. 并发安全：竞态条件、非原子操作
+6. 错误处理：过宽异常捕获、空处理、吞异常
 
-对于每个发现，返回 JSON 格式：
-{"findings": [{"title": "缺陷标题（中文）", "description": "详细描述问题和原理", "severity": "critical|high|medium|low", "category": "security|memory|reliability|logic", "file": "文件路径", "line_start": 起始行号, "line_end": 结束行号, "confidence": 0.0-1.0, "trigger_condition": "触发条件描述", "impact": "实际影响描述", "suggestion": "具体修复建议"}]}
+你必须只返回一个 JSON 对象，不要有任何其他文字：
+{"findings": [{"title": "中文标题", "description": "详细描述", "severity": "critical|high|medium|low", "category": "security|memory|reliability|logic", "file": "文件路径", "line_start": 行号, "line_end": 行号, "confidence": 0.8, "trigger_condition": "触发条件", "impact": "实际影响", "suggestion": "修复建议"}]}
 
-如果没有发现任何问题，返回 {"findings": []}。
+如果没有问题，返回 {"findings": []}。
 
 注意：
-- severity 要准确：critical（可导致系统被攻击/数据泄露）、high（严重 bug）、medium（潜在风险）、low（代码质量问题）
-- confidence 基于证据充分程度：看到确切代码行=0.9+，推测=0.6-0.8
-- 只报告确切的缺陷，不要猜测
-- file 使用 PR diff 中给出的文件路径
-- line_start/line_end 必须是整数"""
+- 重点关注 diff 中删除的 null 检查和条件判断
+- 方法提取后参数传递是否完整
+- confidence 基于证据：看到确切代码=0.9+，推测=0.6-0.8"""
 
 
 class DefectAgent(AgentRuntime):
@@ -184,19 +178,22 @@ class DefectAgent(AgentRuntime):
         return content
 
     def _parse_findings(self, response: str, pack: ContextPack) -> list[Finding]:
-        """从 LLM 响应中解析 Finding 列表。"""
-        # 提取 JSON 块
+        """从 LLM 响应中解析 Finding 列表，支持混合文本。"""
         json_str = response
         if "```json" in response:
             json_str = response.split("```json")[1].split("```")[0]
         elif "```" in response:
             json_str = response.split("```")[1].split("```")[0]
+        else:
+            start = response.find("{")
+            end = response.rfind("}")
+            if start >= 0 and end > start:
+                json_str = response[start:end+1]
 
         try:
             data = json.loads(json_str.strip())
         except json.JSONDecodeError:
-            logger.warning("DefectAgent[%s] LLM 响应不是有效 JSON: %.200s...",
-                           self.agent_id, response)
+            logger.warning("DefectAgent[%s] JSON 解析失败: %.300s", self.agent_id, response)
             return []
 
         findings_data = data.get("findings", [])

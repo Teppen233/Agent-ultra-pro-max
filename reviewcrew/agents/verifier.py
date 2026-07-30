@@ -24,23 +24,21 @@ from .base import AgentRuntime
 
 logger = logging.getLogger(__name__)
 
-VERIFIER_SYSTEM_PROMPT = """你是一个代码审查结果验证专家。你的任务是对其他 Agent 提出的缺陷报告进行独立的二次验证。
+VERIFIER_SYSTEM_PROMPT = """你是一个代码审查结果验证专家。对缺陷报告进行独立二次验证。
 
-对于每个 Finding，判断：
-1. 该缺陷是否确实存在于代码中（confirmed / false_positive）
+判断标准：
+1. 该缺陷是否确实存在于代码中
 2. 严重度 (severity) 是否合理
 3. 置信度 (confidence) 是否合理
-4. 修复建议是否可行
 
-返回 JSON 格式（一次验证一个 Finding）：
-{"verdict": "confirmed|likely|false_positive|insufficient_evidence", "adjusted_severity": "critical|high|medium|low", "adjusted_confidence": 0.0-1.0, "reason": "验证理由（中文）"}
+你必须只返回一个 JSON 对象，不要有任何其他文字：
+{"verdict": "confirmed|likely|false_positive|insufficient_evidence", "adjusted_severity": "critical|high|medium|low", "adjusted_confidence": 0.85, "reason": "简短理由"}
 
-注意：
-- confirmed: 确实存在且证据充分
+verdict 含义：
+- confirmed: 确实存在，证据充分
 - likely: 很可能存在但需要更多上下文
-- false_positive: 审查误报，代码没有问题
-- insufficient_evidence: 证据不足以判断
-- 如果原 Finding 的 severity/confidence 合理，adjusted 值应与原值相同"""
+- false_positive: 误报
+- insufficient_evidence: 证据不足"""
 
 
 class VerifierAgent(AgentRuntime):
@@ -154,39 +152,48 @@ class VerifierAgent(AgentRuntime):
         return data["choices"][0]["message"]["content"]
 
     def _parse_verdict(self, response: str, finding: Finding) -> Verdict:
-        """从 LLM 响应中解析 Verdict。"""
-        json_str = response
+        """从 LLM 响应中解析 Verdict，支持纯 JSON 和混合文本。"""
+        # 尝试多种方式提取 JSON
+        json_str = ""
+        # 1. ```json 代码块
         if "```json" in response:
             json_str = response.split("```json")[1].split("```")[0]
         elif "```" in response:
             json_str = response.split("```")[1].split("```")[0]
+        else:
+            # 2. 查找第一个 { 到最后一个 }
+            start = response.find("{")
+            end = response.rfind("}")
+            if start >= 0 and end > start:
+                json_str = response[start:end+1]
+            else:
+                json_str = response
 
         try:
             data = json.loads(json_str.strip())
         except json.JSONDecodeError:
-            logger.warning("VerifierAgent[%s] 非 JSON 响应，降级接受", self.agent_id)
-            return Verdict(
-                finding_id=finding.id,
-                accepted=True,
-                verdict="likely",
-                confidence=finding.confidence,
-                severity=finding.severity,
-                reason="LLM 验证响应解析失败，降级接受",
-            )
-
-        verdict_map = {
-            "confirmed": "confirmed",
-            "likely": "likely",
-            "false_positive": "false_positive",
-            "insufficient_evidence": "insufficient_evidence",
-        }
-        verdict_type = verdict_map.get(data.get("verdict", "likely"), "likely")
-        accepted = verdict_type in ("confirmed", "likely")
+            logger.warning("VerifierAgent[%s] JSON 解析失败，尝试从文本推断: %.200s",
+                           self.agent_id, response)
+            # 降级：从文本中推断 verdict
+            text = response.lower()
+            if any(w in text for w in ["误报", "false_positive", "不存在", "没有问题", "不是问题"]):
+                return Verdict(finding_id=finding.id, accepted=False,
+                               verdict="false_positive", confidence=finding.confidence,
+                               severity=finding.severity, reason=response[:200])
+            if any(w in text for w in ["确认", "confirmed", "确实存在", "正确"]):
+                return Verdict(finding_id=finding.id, accepted=True,
+                               verdict="confirmed", confidence=finding.confidence,
+                               severity=finding.severity, reason=response[:200])
+            # 默认降级接受
+            logger.warning("VerifierAgent[%s] 无法判断，降级接受", self.agent_id)
+            return Verdict(finding_id=finding.id, accepted=True,
+                           verdict="likely", confidence=finding.confidence,
+                           severity=finding.severity, reason="LLM 响应无明确结论，降级接受")
 
         return Verdict(
             finding_id=finding.id,
-            accepted=accepted,
-            verdict=verdict_type,
+            accepted=data.get("verdict", "likely") in ("confirmed", "likely"),
+            verdict=data.get("verdict", "likely"),
             confidence=data.get("adjusted_confidence", finding.confidence),
             severity=data.get("adjusted_severity", finding.severity),
             reason=data.get("reason", "LLM 验证完成"),
