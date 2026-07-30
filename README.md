@@ -150,6 +150,10 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 打开 `http://127.0.0.1:5173/review`。没有模型 key 时也可以点击“演示 Replay”，从空图开始查看 Coordinator 拆解、并发任务、工具取证、跨 Agent handoff、Verifier 扇出与误报淘汰。
 
+审查 GitHub PR 时，本地仓库路径可以留空。后端会把仓库克隆到被 Git 忽略的 `repos/<owner>__<repository>/`；后续审查复用该目录并执行 `git pull --ff-only`。填写本地仓库路径时也会在审查前执行相同的安全更新。工作区存在未提交修改、origin 与 PR 不匹配或无法快进时，任务会停止并通过前端错误提示说明原因；ReviewCrew 不会自动 stash、reset 或切换分支。
+
+审查本地 `.diff` 文件时无法自动推导仓库，因此仍必须填写对应的本地仓库路径。
+
 主要路由：
 
 - `/review`：实时审查与内置 Replay。
@@ -173,6 +177,10 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 ```bash
 curl -fsS http://127.0.0.1:8000/api/health
+curl -fsS -X POST http://127.0.0.1:8000/api/review \
+  -H 'Content-Type: application/json' \
+  -d '{"pr_url":"https://github.com/owner/repository/pull/123"}'
+
 curl -fsS -X POST http://127.0.0.1:8000/api/review \
   -H 'Content-Type: application/json' \
   -d '{"pr_url":"/tmp/change.diff","repo_path":"/absolute/path/to/repository"}'

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import subprocess
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -23,44 +22,20 @@ from reviewcrew.server.replay import (
     replay_events,
     tail_events_file,
 )
+from reviewcrew.server.repository import prepare_repository
 
 RUN_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
-GITHUB_PR = re.compile(r"^https?://github\.com/([^/]+)/([^/]+)/pull/\d+(?:[/?#].*)?$")
-GITHUB_REMOTE = re.compile(r"github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?$")
 
 
 class ReviewRequest(BaseModel):
     pr_url: str = Field(min_length=1)
-    repo_path: str = Field(min_length=1)
-
-
-def github_repo(value: str, pattern: re.Pattern[str]) -> str | None:
-    match = pattern.search(value.strip())
-    return f"{match.group(1)}/{match.group(2)}".lower() if match else None
-
-
-def validate_repo_matches_pr(pr_url: str, repo: Path) -> None:
-    expected = github_repo(pr_url, GITHUB_PR)
-    if expected is None:
-        return
-    remote = subprocess.run(
-        ["git", "-C", str(repo), "remote", "get-url", "origin"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-        check=False,
-    )
-    actual = github_repo(remote.stdout, GITHUB_REMOTE) if remote.returncode == 0 else None
-    if actual is not None and actual != expected:
-        raise HTTPException(
-            status_code=422,
-            detail=f"PR 属于 {expected}，但本地仓库 origin 是 {actual}，请使用匹配的仓库目录。",
-        )
+    repo_path: str | None = None
 
 
 def create_app(
     runs_dir: Path = Path("runs"),
     benchmark_results_dir: Path = Path("benchmark/results"),
+    repos_dir: Path = Path("repos"),
 ) -> FastAPI:
     application = FastAPI(title="ReviewCrew API", version="0.1.0")
     application.add_middleware(
@@ -120,17 +95,16 @@ def create_app(
 
     @application.post("/api/review", status_code=202)
     async def start_review(request: ReviewRequest) -> dict[str, str]:
-        repo = Path(request.repo_path).resolve()
-        if not repo.is_dir():
-            raise HTTPException(
-                status_code=422,
-                detail=f"本地仓库目录不存在或不是目录：{repo}",
-            )
-        validate_repo_matches_pr(request.pr_url, repo)
         run_id = uuid.uuid4().hex[:12]
 
         async def execute() -> None:
             try:
+                repo = await asyncio.to_thread(
+                    prepare_repository,
+                    request.pr_url,
+                    request.repo_path,
+                    repos_dir,
+                )
                 await Orchestrator(runs_dir=runs_dir).review(request.pr_url, repo, run_id=run_id)
             except Exception as error:
                 record_run_error(run_id, error)

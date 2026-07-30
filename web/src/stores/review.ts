@@ -334,14 +334,14 @@ export const useReviewStore = defineStore('review', {
       this.rebuildReplay(0)
       this.playReplay()
     },
-    async startReview(prUrl: string, repoPath: string) {
+    async startReview(prUrl: string, repoPath?: string) {
       this.reset()
       this.loading = true
       try {
         const response = await fetch('/api/review', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pr_url: prUrl, repo_path: repoPath }),
+          body: JSON.stringify({ pr_url: prUrl, repo_path: repoPath?.trim() || null }),
         })
         if (!response.ok) throw new Error(await responseError(response, '审查任务启动失败'))
         const payload = (await response.json()) as { run_id: string }

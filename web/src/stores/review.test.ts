@@ -46,6 +46,39 @@ describe('review workflow reducer', () => {
     expect(store.workflowNodes.at(-1)?.kind).toBe('report')
   })
 
+  it('sends a null repository path when automatic checkout is requested', async () => {
+    class FakeEventSource {
+      onerror: (() => void) | null = null
+
+      addEventListener() {}
+
+      close() {}
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ run_id: 'run-auto-repo' }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('EventSource', FakeEventSource)
+    const store = useReviewStore()
+
+    try {
+      await store.startReview('https://github.com/owner/repo/pull/42', '   ')
+
+      const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+      expect(JSON.parse(String(request?.body))).toEqual({
+        pr_url: 'https://github.com/owner/repo/pull/42',
+        repo_path: null,
+      })
+    } finally {
+      store.stopSource()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('rebuilds deterministic state when stepping and seeking', () => {
     const store = useReviewStore()
     store.setReplaySource(demoEvents, true)

@@ -13,7 +13,7 @@ const prUrl = ref('')
 const repoPath = ref('')
 
 function submit() {
-  if (prUrl.value.trim() && repoPath.value.trim()) {
+  if (prUrl.value.trim()) {
     emit('submit', prUrl.value.trim(), repoPath.value.trim())
   }
 }
@@ -22,8 +22,13 @@ function submit() {
 <template>
   <form class="review-form" @submit.prevent="submit">
     <NInput v-model:value="prUrl" aria-label="GitHub PR URL 或本地 Diff 路径" placeholder="GitHub PR URL 或本地 .diff 路径" clearable />
-    <NInput v-model:value="repoPath" aria-label="本地仓库绝对路径" placeholder="本地仓库绝对路径" clearable />
-    <NButton attr-type="submit" type="primary" :loading="loading" :disabled="!prUrl.trim() || !repoPath.trim()">
+    <NInput
+      v-model:value="repoPath"
+      aria-label="本地仓库绝对路径（可选）"
+      placeholder="可选；PR 留空自动拉取，本地 Diff 必填"
+      clearable
+    />
+    <NButton attr-type="submit" type="primary" :loading="loading" :disabled="!prUrl.trim()">
       <template #icon>
         <Play :size="16" />
       </template>

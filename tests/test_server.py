@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import threading
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from reviewcrew.models import PipelineEvent
@@ -24,12 +25,10 @@ def write_run(runs_dir: Path, run_id: str = "test123") -> None:
     directory.joinpath("report.md").write_text("# Done\n", encoding="utf-8")
 
 
-def test_health_and_start_validation(tmp_path: Path) -> None:
+def test_health_and_request_validation(tmp_path: Path) -> None:
     client = TestClient(create_app(tmp_path / "runs"))
     assert client.get("/api/health").json() == {"status": "ok"}
-    response = client.post(
-        "/api/review", json={"pr_url": "https://example.test/pr/1", "repo_path": "missing"}
-    )
+    response = client.post("/api/review", json={})
     assert response.status_code == 422
 
 
@@ -47,34 +46,45 @@ def test_local_frontend_port_is_allowed_by_cors(tmp_path: Path) -> None:
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5175"
 
 
-def test_review_rejects_pr_from_different_github_repo(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo),
-            "remote",
-            "add",
-            "origin",
-            "https://github.com/Netflix/metaflow.git",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    client = TestClient(create_app(tmp_path / "runs"))
+def test_review_accepts_missing_repository_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared = tmp_path / "repos" / "owner__repo"
+    prepared.mkdir(parents=True)
+    preparation_calls: list[tuple[str, str | None, Path]] = []
+    reviewed = threading.Event()
 
-    response = client.post(
-        "/api/review",
-        json={
-            "pr_url": "https://github.com/keycloak/keycloak/pull/1",
-            "repo_path": str(repo),
-        },
-    )
+    def prepare(pr_url: str, repo_path: str | None, repos_dir: Path) -> Path:
+        preparation_calls.append((pr_url, repo_path, repos_dir))
+        return prepared
 
-    assert response.status_code == 422
-    assert "PR 属于 keycloak/keycloak" in response.json()["detail"]
+    async def review(
+        _self: object,
+        _pr_url: str,
+        repo_path: Path,
+        run_id: str | None = None,
+    ) -> object:
+        assert repo_path == prepared
+        assert run_id is not None
+        reviewed.set()
+        return object()
+
+    monkeypatch.setattr("reviewcrew.server.app.prepare_repository", prepare)
+    monkeypatch.setattr("reviewcrew.server.app.Orchestrator.review", review)
+    repos_dir = tmp_path / "repos"
+
+    with TestClient(create_app(tmp_path / "runs", repos_dir=repos_dir)) as client:
+        response = client.post(
+            "/api/review",
+            json={"pr_url": "https://github.com/owner/repo/pull/42"},
+        )
+        assert response.status_code == 202
+        assert reviewed.wait(timeout=1)
+
+    assert preparation_calls == [
+        ("https://github.com/owner/repo/pull/42", None, repos_dir)
+    ]
 
 
 def test_replay_is_sse_and_run_detail(tmp_path: Path) -> None:
