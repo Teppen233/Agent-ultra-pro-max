@@ -1,367 +1,315 @@
 <template>
-  <div class="result-page">
-    <!-- 头部 -->
-    <div class="result-header">
-      <div>
-        <h2>审查结果</h2>
-        <span class="run-id">Run: {{ store.runId }}</span>
-      </div>
-      <div class="header-actions">
-        <button v-if="store.reportUrl" class="btn" @click="downloadReport">下载 Markdown 报告</button>
-        <router-link to="/" class="btn btn-outline">新建审查</router-link>
-      </div>
+  <div class="history-page">
+    <div class="page-header">
+      <h2>审查历史</h2>
+      <button class="btn" @click="loadHistory" :disabled="loading">
+        <span v-if="loading" class="spinner"></span>
+        {{ loading ? '加载中...' : '刷新' }}
+      </button>
     </div>
 
-    <!-- 统计摘要 -->
+    <!-- 统计 -->
     <div class="stats-row">
       <div class="stat-card">
-        <span class="stat-value">{{ store.acceptedFindings.length }}</span>
-        <span class="stat-label">确认发现</span>
-      </div>
-      <div class="stat-card rejected">
-        <span class="stat-value">{{ store.rejectedFindings.length }}</span>
-        <span class="stat-label">已拒绝</span>
+        <span class="stat-value">{{ summaries.length }}</span>
+        <span class="stat-label">总审查数</span>
       </div>
       <div class="stat-card">
-        <span class="stat-value">{{ formatMs(store.totalDurationMs) }}</span>
-        <span class="stat-label">总耗时</span>
+        <span class="stat-value">{{ totalFindings }}</span>
+        <span class="stat-label">总发现</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">{{ avgTime }}</span>
+        <span class="stat-label">平均耗时</span>
       </div>
     </div>
 
     <!-- 加载中 -->
-    <div v-if="loading" class="loading-state">
-      <div class="skeleton skeleton-title"></div>
-      <div class="skeleton skeleton-row" v-for="i in 3" :key="i"></div>
-      <p class="loading-text">正在加载审查结果...</p>
+    <div v-if="loading && !summaries.length" class="loading-state">
+      <div class="skeleton skeleton-row" v-for="i in 4" :key="i"></div>
     </div>
 
-    <!-- 错误状态 -->
+    <!-- 错误 -->
     <div v-else-if="error" class="status-banner error">
       {{ error }}
-      <button class="btn btn-sm" @click="retryLoad">重试</button>
-      <router-link to="/" class="btn btn-sm btn-outline">返回首页</router-link>
+      <button class="btn btn-sm" @click="loadHistory">重试</button>
     </div>
 
-    <!-- 正常内容 -->
-    <template v-else>
-      <!-- 筛选 -->
-      <div class="filters">
-        <div class="filter-group">
-          <label>严重度</label>
-          <select v-model="filterSeverity" class="select">
-            <option value="">全部</option>
-            <option value="critical">严重</option>
-            <option value="high">高</option>
-            <option value="medium">中</option>
-            <option value="low">低</option>
-          </select>
+    <!-- 空状态 -->
+    <div v-else-if="!summaries.length" class="empty-state">
+      暂无审查记录，去
+      <router-link to="/">发起一次审查</router-link>
+      吧。
+    </div>
+
+    <!-- 历史列表 -->
+    <div v-else class="history-list">
+      <div
+        v-for="s in summaries"
+        :key="s.run_id"
+        class="history-card"
+        :class="s.status"
+        @click="viewDetail(s.run_id)"
+      >
+        <div class="card-left">
+          <span class="status-dot" :class="s.status"></span>
+          <div>
+            <div class="repo-name">{{ formatRepo(s.repository) }}</div>
+            <div class="run-id">Run: {{ s.run_id }}</div>
+          </div>
         </div>
-        <div class="filter-group">
-          <label>类别</label>
-          <select v-model="filterCategory" class="select">
-            <option value="">全部</option>
-            <option v-for="cat in allCategories" :key="cat" :value="cat">{{ cat }}</option>
-          </select>
+        <div class="card-center">
+          <span class="finding-count">{{ s.finding_count }} 发现</span>
+          <span v-if="s.rejected_count" class="rejected">+{{ s.rejected_count }} 拒绝</span>
         </div>
-        <div class="filter-group">
-          <label>来源</label>
-          <select v-model="filterProducer" class="select">
-            <option value="">全部</option>
-            <option value="defect">缺陷检测</option>
-            <option value="intent">意图分析</option>
-          </select>
+        <div class="card-right">
+          <span class="elapsed">{{ formatElapsed(s.elapsed_seconds) }}</span>
+          <span class="time">{{ formatTime(s.started_at) }}</span>
         </div>
       </div>
+    </div>
 
-      <!-- Finding 列表 -->
-      <div v-if="filteredFindings.length === 0" class="empty-state">
-        暂无匹配的审查发现
+    <!-- 详情弹窗 -->
+    <div v-if="selectedRun" class="detail-overlay" @click.self="selectedRun = null">
+      <div class="detail-modal">
+        <div class="modal-header">
+          <h3>审查详情 — {{ selectedRun }}</h3>
+          <button class="close-btn" @click="selectedRun = null">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="detailLoading" class="loading-text">加载中...</div>
+          <div v-else-if="detailError" class="error-msg">{{ detailError }}</div>
+          <template v-else>
+            <FindingCard
+              v-for="entry in detailFindings"
+              :key="entry.finding.id"
+              :finding="entry.finding"
+              :verifier-status="entry.verifierStatus"
+              :verifier-reason="entry.verifierReason"
+              :show-detail="true"
+            />
+            <div v-if="!detailFindings.length" class="empty">暂无审查发现</div>
+          </template>
+        </div>
       </div>
-
-      <FindingCard
-        v-for="entry in filteredFindings"
-        :key="entry.finding.id"
-        :finding="entry.finding"
-        :verifier-status="entry.verifierStatus"
-        :verifier-reason="entry.verifierReason"
-        :show-detail="true"
-      />
-    </template>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useReviewStore } from '../stores/review'
-import { getStatus, getReport } from '../api/client'
+import { getStatus } from '../api/client'
 import FindingCard from '../components/FindingCard.vue'
 
-const route = useRoute()
+const router = useRouter()
 const store = useReviewStore()
-const runId = route.params.runId as string | undefined
 
-const filterSeverity = ref('')
-const filterCategory = ref('')
-const filterProducer = ref('')
+interface RunSummary {
+  run_id: string
+  status: string
+  repository: string
+  finding_count: number
+  rejected_count: number
+  elapsed_seconds: number
+  started_at: string
+}
+
+const summaries = ref<RunSummary[]>([])
+const loading = ref(false)
 const error = ref<string | null>(null)
-const loading = ref(true)
 
-onMounted(async () => {
-  if (!runId) {
-    error.value = '缺少审查 Run ID，请从首页发起审查。'
-    loading.value = false
-    return
-  }
-  try {
-    const status = await getStatus(runId)
-    store.reset()
-    store.applyEvents(status.events)
-  } catch {
-    error.value = '加载审查结果失败，请检查网络连接或稍后重试。'
-  } finally {
-    loading.value = false
-  }
+// 详情弹窗
+const selectedRun = ref<string | null>(null)
+const detailLoading = ref(false)
+const detailError = ref<string | null>(null)
+const detailFindings = ref<Array<{ finding: any; verifierStatus: string; verifierReason?: string }>>([])
+
+const totalFindings = computed(() => summaries.value.reduce((s, r) => s + r.finding_count, 0))
+const avgTime = computed(() => {
+  if (!summaries.value.length) return '--'
+  const avg = summaries.value.reduce((s, r) => s + r.elapsed_seconds, 0) / summaries.value.length
+  return formatElapsed(avg)
 })
 
-const allCategories = computed(() => {
-  const cats = new Set<string>()
-  for (const c of store.candidates) {
-    if (c.finding.category) cats.add(c.finding.category)
-  }
-  return [...cats].sort()
-})
-
-const filteredFindings = computed(() => {
-  return store.candidates.filter((entry) => {
-    const f = entry.finding
-    if (filterSeverity.value && f.severity !== filterSeverity.value) return false
-    if (filterCategory.value && f.category !== filterCategory.value) return false
-    if (filterProducer.value && f.producer !== filterProducer.value) return false
-    return true
-  })
-})
-
-async function downloadReport() {
-  if (!runId) return
-  try {
-    const text = await getReport(runId)
-    const blob = new Blob([text], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `review-${runId}.md`
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch {
-    error.value = '下载报告失败，请稍后重试。'
-  }
-}
-
-function formatMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  const secs = (ms / 1000).toFixed(1)
-  return `${secs}s`
-}
-
-async function retryLoad() {
-  if (!runId) return
-  error.value = null
+async function loadHistory() {
   loading.value = true
+  error.value = null
   try {
-    const status = await getStatus(runId)
-    store.reset()
-    store.applyEvents(status.events)
-  } catch {
-    error.value = '加载审查结果失败，请检查网络连接或稍后重试。'
+    const res = await fetch('/api/runs/summary')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    summaries.value = data.runs || []
+  } catch (e) {
+    error.value = '加载历史失败，请检查后端服务'
   } finally {
     loading.value = false
   }
 }
+
+async function viewDetail(runId: string) {
+  selectedRun.value = runId
+  detailLoading.value = true
+  detailError.value = null
+  try {
+    const status = await getStatus(runId)
+    store.reset()
+    store.applyEvents(status.events)
+    // Map accepted/rejected status
+    const acceptedIds = new Set(
+      status.events
+        .filter((e: any) => e.type === 'verifier.accepted')
+        .map((e: any) => e.data?.finding_id)
+    )
+    const rejectedIds = new Set(
+      status.events
+        .filter((e: any) => e.type === 'verifier.rejected')
+        .map((e: any) => e.data?.finding_id)
+    )
+    detailFindings.value = store.candidates.map(c => ({
+      finding: c.finding,
+      verifierStatus: acceptedIds.has(c.finding.id) ? 'accepted'
+        : rejectedIds.has(c.finding.id) ? 'rejected' : 'pending',
+      verifierReason: '',
+    }))
+  } catch (e) {
+    detailError.value = '加载详情失败'
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+function formatRepo(repo: string) {
+  if (!repo) return 'Unknown'
+  return repo.replace('https://github.com/', '').replace(/\/pull\/\d+.*/, '')
+}
+
+function formatElapsed(sec: number) {
+  if (!sec) return '--'
+  if (sec < 60) return `${sec.toFixed(0)}s`
+  return `${(sec / 60).toFixed(1)}min`
+}
+
+function formatTime(ts: string) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+onMounted(loadHistory)
 </script>
 
 <style scoped>
-.result-page {
-  max-width: 960px;
-  margin: 0 auto;
-}
+.history-page { max-width: 960px; margin: 0 auto; }
 
-.result-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+.page-header {
+  display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 24px;
 }
 
-.run-id {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  font-family: monospace;
-}
+.page-header h2 { font-size: 22px; }
 
-.header-actions {
-  display: flex;
-  gap: 8px;
+.btn {
+  padding: 8px 20px; border: none; border-radius: var(--radius);
+  background: var(--color-primary); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
 }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff;
+  border-radius: 50%; animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .stats-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
   margin-bottom: 24px;
 }
 
 .stat-card {
-  background: var(--color-surface);
-  border-radius: var(--radius);
-  padding: 20px;
-  box-shadow: var(--shadow);
-  text-align: center;
+  background: var(--color-surface); border-radius: var(--radius);
+  padding: 20px; box-shadow: var(--shadow); text-align: center;
 }
+.stat-value { display: block; font-size: 28px; font-weight: 700; }
+.stat-label { font-size: 13px; color: var(--color-text-muted); }
 
-.stat-card.rejected {
-  background: #fef2f2;
-}
-
-.stat-value {
-  display: block;
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.stat-label {
-  font-size: 13px;
-  color: var(--color-text-muted);
-}
-
-.filters {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 24px;
-  background: var(--color-surface);
-  padding: 16px;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-}
-
-.filter-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.filter-group label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-}
-
-.select {
-  padding: 6px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  font-size: 13px;
-  background: var(--color-surface);
-}
-
-.empty-state {
-  text-align: center;
-  padding: 48px;
-  color: var(--color-text-muted);
-  font-size: 15px;
-}
-
-.btn {
-  padding: 8px 20px;
-  border: none;
-  border-radius: var(--radius);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  background: var(--color-primary);
-  color: #fff;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-}
-
-.btn-outline {
-  background: var(--color-surface);
-  color: var(--color-primary);
-  border: 1px solid var(--color-primary);
-}
-
-.loading-state {
-  padding: 48px 0;
-  text-align: center;
-}
-
+.loading-state { padding: 24px 0; }
 .skeleton {
-  background: linear-gradient(90deg, var(--color-border) 25%, #e8ecf1 50%, var(--color-border) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 4px;
-  margin: 0 auto 12px;
+  height: 60px; background: linear-gradient(90deg, var(--color-border) 25%, #e8ecf1 50%, var(--color-border) 75%);
+  background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 8px; margin-bottom: 8px;
 }
-
-.skeleton-title {
-  height: 28px;
-  width: 300px;
-  max-width: 80%;
-}
-
-.skeleton-row {
-  height: 16px;
-  width: 500px;
-  max-width: 90%;
-}
-
-.loading-text {
-  margin-top: 16px;
-  color: var(--color-text-muted);
-  font-size: 14px;
-}
-
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
-.status-banner {
-  margin-top: 24px;
-  padding: 16px 20px;
-  border-radius: var(--radius);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  flex-wrap: wrap;
-}
+.empty-state { text-align: center; padding: 64px 0; color: var(--color-text-muted); font-size: 15px; }
+.empty-state a { color: var(--color-primary); }
 
-.status-banner.error {
-  background: #fef2f2;
-  color: #991b1b;
-  border: 1px solid #fecaca;
-}
+.history-list { display: flex; flex-direction: column; gap: 8px; }
 
-.btn-sm {
-  padding: 6px 16px;
-  border-radius: 4px;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  border: none;
-  cursor: pointer;
-  background: var(--color-primary);
-  color: #fff;
+.history-card {
+  background: var(--color-surface); border-radius: var(--radius);
+  padding: 14px 20px; box-shadow: var(--shadow);
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; transition: box-shadow 0.15s;
+  border-left: 3px solid var(--color-border);
 }
+.history-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+.history-card.completed { border-left-color: var(--color-success); }
+.history-card.failed { border-left-color: var(--color-danger); }
+.history-card.partial { border-left-color: var(--color-warning); }
 
-.btn-outline.btn-sm {
-  background: var(--color-surface);
-  color: var(--color-primary);
-  border: 1px solid var(--color-primary);
+.card-left { display: flex; align-items: center; gap: 12px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.completed { background: var(--color-success); }
+.status-dot.failed { background: var(--color-danger); }
+.status-dot.running { background: var(--color-primary); animation: pulse 1s infinite; }
+.status-dot.partial { background: var(--color-warning); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.repo-name { font-size: 15px; font-weight: 600; }
+.run-id { font-size: 11px; color: var(--color-text-muted); font-family: monospace; }
+
+.card-center { display: flex; gap: 8px; align-items: center; }
+.finding-count { font-size: 14px; font-weight: 600; }
+.rejected { font-size: 12px; color: var(--color-text-muted); }
+
+.card-right { display: flex; flex-direction: column; align-items: flex-end; }
+.elapsed { font-size: 14px; font-weight: 500; }
+.time { font-size: 11px; color: var(--color-text-muted); }
+
+.status-banner.error { background: #fef2f2; color: #991b1b; padding: 12px 16px; border-radius: var(--radius); display: flex; align-items: center; gap: 12px; }
+.btn-sm { padding: 6px 16px; border-radius: 4px; font-size: 13px; border: none; cursor: pointer; background: var(--color-primary); color: #fff; }
+
+/* 弹窗 */
+.detail-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.25);
+  display: flex; align-items: center; justify-content: center;
+}
+.detail-modal {
+  background: var(--color-surface); border-radius: 12px;
+  width: 720px; max-width: 90vw; max-height: 85vh;
+  display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--color-border);
+}
+.modal-header h3 { font-size: 16px; }
+.close-btn { font-size: 24px; border: none; background: none; cursor: pointer; color: var(--color-text-muted); }
+.modal-body { flex: 1; overflow-y: auto; padding: 16px; }
+.loading-text, .error-msg { text-align: center; padding: 32px; color: var(--color-text-muted); }
+.empty { text-align: center; padding: 32px; color: var(--color-text-muted); }
+
+@media (max-width: 640px) {
+  .stats-row { grid-template-columns: 1fr; }
+  .history-card { flex-direction: column; gap: 8px; align-items: flex-start; }
+  .card-right { flex-direction: row; gap: 8px; }
 }
 </style>

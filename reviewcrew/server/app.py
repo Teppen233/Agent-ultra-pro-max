@@ -223,6 +223,37 @@ async def list_runs():
     return {"runs": runs, "count": len(runs)}
 
 
+@app.get("/api/runs/summary")
+async def list_runs_summary():
+    """列出所有历史审查的摘要信息（用于历史列表展示）。"""
+    store = _get_store()
+    runs_dir = Path(_config.runs_dir if _config else "runs")
+    summaries = []
+
+    for run_id in store.list_runs():
+        result_file = runs_dir / run_id / "result.json"
+        if not result_file.exists():
+            continue
+        try:
+            data = json.loads(result_file.read_text(encoding="utf-8"))
+            summaries.append({
+                "run_id": run_id,
+                "status": data.get("status", "unknown"),
+                "repository": data.get("repository", ""),
+                "finding_count": len(data.get("findings", [])),
+                "rejected_count": data.get("rejected_count", 0),
+                "elapsed_seconds": data.get("elapsed_seconds", 0),
+                "started_at": data.get("started_at", ""),
+                "completed_at": data.get("completed_at", ""),
+                "warnings": data.get("warnings", []),
+            })
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    summaries.sort(key=lambda x: x.get("started_at", ""), reverse=True)
+    return {"runs": summaries, "count": len(summaries)}
+
+
 @app.get("/api/replays/{run_id}/events")
 async def replay_run_events(run_id: str, speed: float = 1.0):
     """回放历史运行的事件流（支持变速）。
