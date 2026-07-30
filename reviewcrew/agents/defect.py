@@ -207,8 +207,10 @@ class DefectAgent(AgentRuntime):
         findings: list[Finding] = []
         for item in findings_data:
             try:
-                # 确保文件路径匹配 ContextPack 中的文件
                 file_path = item.get("file", pack.files[0] if pack.files else "unknown")
+                # 行号 sanitize: LLM 可能返回 0
+                ls = max(1, int(item.get("line_start", 1) or 1))
+                le = max(ls, int(item.get("line_end", ls) or ls))
                 finding = Finding(
                     id=f"find-{uuid.uuid4().hex[:8]}",
                     producer="defect",
@@ -216,8 +218,8 @@ class DefectAgent(AgentRuntime):
                     severity=item.get("severity", "medium"),
                     confidence=float(item.get("confidence", 0.7)),
                     file=file_path,
-                    line_start=int(item.get("line_start", 1)),
-                    line_end=int(item.get("line_end", item.get("line_start", 1))),
+                    line_start=ls,
+                    line_end=le,
                     title=item.get("title", "未命名缺陷"),
                     description=item.get("description", ""),
                     trigger_condition=item.get("trigger_condition", ""),

@@ -193,6 +193,8 @@ class IntentAgent(AgentRuntime):
         for item in findings_data:
             try:
                 file_path = item.get("file", pack.files[0] if pack.files else "unknown")
+                ls = max(1, int(item.get("line_start", 1) or 1))
+                le = max(ls, int(item.get("line_end", ls) or ls))
                 finding = Finding(
                     id=f"find-{uuid.uuid4().hex[:8]}",
                     producer="intent",
@@ -200,8 +202,8 @@ class IntentAgent(AgentRuntime):
                     severity=item.get("severity", "medium"),
                     confidence=float(item.get("confidence", 0.7)),
                     file=file_path,
-                    line_start=int(item.get("line_start", 1)),
-                    line_end=int(item.get("line_end", item.get("line_start", 1))),
+                    line_start=ls,
+                    line_end=le,
                     title=item.get("title", "逻辑问题"),
                     description=item.get("description", ""),
                     trigger_condition=item.get("trigger_condition", ""),
@@ -212,8 +214,8 @@ class IntentAgent(AgentRuntime):
                     evidence=[
                         CodeEvidence(
                             file=file_path,
-                            line_start=int(item.get("line_start", 1)),
-                            line_end=int(item.get("line_end", item.get("line_start", 1))),
+                            line_start=ls,
+                            line_end=le,
                             content=item.get("description", "")[:500],
                             language="",
                         )
