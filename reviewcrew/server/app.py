@@ -57,6 +57,12 @@ def _get_orchestrator() -> Orchestrator:
         _config = Config.from_env()
         _store = EventStore(_config.runs_dir)
         _orchestrator = Orchestrator(_config, _store)
+        # 检测 LLM 是否可用（Agent 直接通过 httpx 调用 API，不依赖 pydantic-ai）
+        api_key = _config.llm_api_key.get_secret_value()
+        if api_key:
+            logger.info("LLM 已配置: %s @ %s", _config.llm_model_name, _config.llm_base_url)
+        else:
+            logger.warning("LLM_API_KEY 未配置，将使用静态规则审查")
     return _orchestrator
 
 

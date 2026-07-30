@@ -21,6 +21,9 @@ from ..context.builder import build_context
 from ..pipeline.dedupe import deduplicate_findings
 from ..pipeline.report import render_markdown
 from ..pipeline.static_reviewer import run_static_review
+from ..agents.defect import DefectAgent
+from ..agents.intent import IntentAgent
+from ..agents.verifier import VerifierAgent
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +87,7 @@ class Orchestrator:
                     build_context(pr_data, repo_path, self.config),
                 )
 
-                # 阶段 3: 专家审查（并行运行 DefectAgent + IntentAgent 静态规则）
+                # 阶段 3: 专家审查（并行运行 DefectAgent + IntentAgent）
                 self.events.emit(run_id, "stage.started", {"stage": "reviewing"})
                 self.events.emit(run_id, "agent.started", {
                     "agent": "defect", "agent_name": "缺陷检测 Agent",
@@ -93,41 +96,101 @@ class Orchestrator:
                     "agent": "intent", "agent_name": "意图分析 Agent",
                 })
 
-                # 使用静态规则引擎进行审查（无需 LLM）
-                findings, rule_hits = run_static_review(pr_data)
-                all_findings.extend(findings)
+                use_llm = bool(self.config.llm_api_key.get_secret_value())
 
-                self.events.emit(run_id, "agent.completed", {
-                    "agent": "defect", "findings": len(findings),
-                })
-                self.events.emit(run_id, "agent.completed", {
-                    "agent": "intent", "findings": 0,
-                })
+                if use_llm and packs:
+                    logger.info("使用 LLM Agent 进行审查 (%s)", self.config.llm_model_name)
+                    defect_agent = DefectAgent(None, agent_id="defect-1")
+                    intent_agent = IntentAgent(None, agent_id="intent-1")
+
+                    defect_findings, intent_findings = await asyncio.gather(
+                        defect_agent.run(contexts=packs, pr_data=pr_data),
+                        intent_agent.run(contexts=packs, pr_data=pr_data),
+                    )
+                    all_findings.extend(defect_findings)
+                    all_findings.extend(intent_findings)
+
+                    self.events.emit(run_id, "agent.completed", {
+                        "agent": "defect", "findings": len(defect_findings),
+                    })
+                    self.events.emit(run_id, "agent.completed", {
+                        "agent": "intent", "findings": len(intent_findings),
+                    })
+                else:
+                    # 降级：使用静态规则引擎
+                    if not use_llm:
+                        logger.warning("LLM 不可用，降级为静态规则审查")
+                        warnings.append("LLM 未配置或不可用，使用静态规则引擎进行审查")
+                    findings, rule_hits = run_static_review(pr_data)
+                    all_findings.extend(findings)
+
+                    self.events.emit(run_id, "agent.completed", {
+                        "agent": "defect", "findings": len(findings),
+                    })
+                    self.events.emit(run_id, "agent.completed", {
+                        "agent": "intent", "findings": 0,
+                    })
+
                 self.events.emit(run_id, "stage.completed", {"stage": "reviewing"})
 
                 # 阶段 4: 去重
                 if all_findings:
                     all_findings = deduplicate_findings(all_findings)
 
-                # 阶段 5: Verifier（简化验证 —— 过滤低置信度）
+                # 阶段 5: Verifier（LLM 验证或降级为置信度过滤）
                 if all_findings:
                     self.events.emit(run_id, "stage.started", {"stage": "verifying"})
                     self.events.emit(run_id, "verifier.started", {})
                     kept = []
                     rejected = 0
-                    for f in all_findings:
-                        if f.confidence >= 0.6:
-                            kept.append(f)
-                            self.events.emit(run_id, "verifier.accepted", {
-                                "finding_id": f.id,
-                                "reason": f"置信度 {f.confidence:.0%}，证据充分",
-                            })
-                        else:
-                            rejected += 1
-                            self.events.emit(run_id, "verifier.rejected", {
-                                "finding_id": f.id,
-                                "reason": f"置信度不足 ({f.confidence:.0%})",
-                            })
+
+                    if use_llm:
+                        logger.info("使用 LLM Verifier 验证 %d 个候选 Finding", len(all_findings))
+                        verifier = VerifierAgent(None, agent_id="verifier-1")
+                        context_prompt = (
+                            f"PR: {pr_data.title}\n{pr_data.description[:1000]}\n"
+                            f"Repository: {pr_data.repository}"
+                        )
+                        for f in all_findings:
+                            try:
+                                verdict = await verifier.verify_finding(f, context_prompt)
+                                if verdict.accepted:
+                                    # 应用 Verifier 调整后的严重度和置信度
+                                    f.severity = verdict.severity if verdict.severity else f.severity
+                                    f.confidence = verdict.confidence
+                                    kept.append(f)
+                                    self.events.emit(run_id, "verifier.accepted", {
+                                        "finding_id": f.id,
+                                        "reason": verdict.reason,
+                                    })
+                                else:
+                                    rejected += 1
+                                    self.events.emit(run_id, "verifier.rejected", {
+                                        "finding_id": f.id,
+                                        "reason": verdict.reason,
+                                    })
+                            except Exception as e:
+                                logger.warning("Verifier 验证 %s 失败: %s，降级为置信度过滤", f.id, e)
+                                if f.confidence >= 0.6:
+                                    kept.append(f)
+                                else:
+                                    rejected += 1
+                    else:
+                        # 降级：纯置信度过滤
+                        for f in all_findings:
+                            if f.confidence >= 0.6:
+                                kept.append(f)
+                                self.events.emit(run_id, "verifier.accepted", {
+                                    "finding_id": f.id,
+                                    "reason": f"置信度 {f.confidence:.0%}，证据充分",
+                                })
+                            else:
+                                rejected += 1
+                                self.events.emit(run_id, "verifier.rejected", {
+                                    "finding_id": f.id,
+                                    "reason": f"置信度不足 ({f.confidence:.0%})",
+                                })
+
                     all_findings = kept
                     self.events.emit(run_id, "verifier.completed", {
                         "accepted": len(kept), "rejected": rejected,
