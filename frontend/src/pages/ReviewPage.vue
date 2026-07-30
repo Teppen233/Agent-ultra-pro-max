@@ -1,11 +1,21 @@
+<script lang="ts">
+/** 保持 Demo 与历史服务端回放的报告往返上下文，避免误入 live SSE。 */
+export const presentReviewResultLink = (runId: string, isServerReplay: boolean, isDemo: boolean) => ({
+  name: 'result',
+  params: { runId },
+  query: isDemo ? { demo: '1' } : isServerReplay ? { replay: '1' } : {},
+})
+</script>
+
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
-import { replayEventLog } from '@/api/client'
+import { createReplayController, createReplayElapsedClock, parseEventLog } from '@/api/client'
 import AgentTeamGraph from '@/components/AgentTeamGraph.vue'
 import BudgetMeter from '@/components/BudgetMeter.vue'
 import FindingCard from '@/components/FindingCard.vue'
+import ReplayControls from '@/components/ReplayControls.vue'
 import StageProgress from '@/components/StageProgress.vue'
 import Timeline from '@/components/Timeline.vue'
 import demoEvents from '@/fixtures/demo-events.jsonl?raw'
@@ -23,9 +33,81 @@ const store = computed(() => isPlayback.value ? playbackStore : liveStore)
 const runs = useRunsStore()
 const playbackConnection = ref<'connecting' | 'replay' | 'reconnecting' | 'closed' | 'error'>('connecting')
 const playbackMessage = ref('正在建立回放连接…')
-const replayController = new AbortController()
+const replaySpeed = ref(1)
+const replayPaused = ref(false)
+const skipIdle = ref(false)
+const replayClock = ref(Date.now())
+const replayElapsedClock = createReplayElapsedClock()
+const demoReplayEvents = parseEventLog(demoEvents)
+const originalReplayElapsedMs = computed(() => {
+  const events = isDemo.value ? demoReplayEvents : playbackStore.events
+  if (events.length < 2) return 0
+  return Math.max(0, Date.parse(events[events.length - 1]!.timestamp) - Date.parse(events[0]!.timestamp))
+})
+const replayElapsedMs = computed(() => {
+  replayClock.value
+  return replayElapsedClock.value()
+})
 let serverReplaySubscription: { close(): void } | undefined
-let currentReplayToken = ''
+let localReplayController: ReturnType<typeof createReplayController> | undefined
+let replayTimer: number | undefined
+
+const startReplayTimer = (): void => {
+  if (replayTimer !== undefined) return
+  replayTimer = window.setInterval(() => { replayClock.value = Date.now() }, 100)
+}
+
+const stopReplayTimer = (): void => {
+  if (replayTimer === undefined) return
+  window.clearInterval(replayTimer)
+  replayTimer = undefined
+}
+
+/** 启动或重新开始离线回放，保持其状态与真实 SSE 隔离。 */
+const startDemoReplay = (): void => {
+  localReplayController?.dispose()
+  playbackStore.reset()
+  replayPaused.value = false
+  replayElapsedClock.start()
+  startReplayTimer()
+  playbackConnection.value = 'replay'
+  playbackMessage.value = '离线回放播放中'
+  const controller = createReplayController(demoReplayEvents, playbackStore.applyEvent)
+  controller.setSpeed(replaySpeed.value)
+  controller.skipIdle = skipIdle.value
+  localReplayController = controller
+  controller.play()
+  void controller.finished.then(() => {
+    if (localReplayController !== controller) return
+    replayElapsedClock.finish()
+    stopReplayTimer()
+    playbackConnection.value = 'closed'
+    playbackMessage.value = '离线回放已完成'
+  })
+}
+
+const updateReplaySpeed = (speed: number): void => {
+  replaySpeed.value = speed
+  localReplayController?.setSpeed(speed)
+}
+
+const updateReplayPaused = (paused: boolean): void => {
+  replayPaused.value = paused
+  if (paused) {
+    localReplayController?.pause()
+    replayElapsedClock.pause()
+    stopReplayTimer()
+  } else {
+    localReplayController?.play()
+    replayElapsedClock.resume()
+    startReplayTimer()
+  }
+}
+
+const updateSkipIdle = (enabled: boolean): void => {
+  skipIdle.value = enabled
+  if (localReplayController) localReplayController.skipIdle = enabled
+}
 const connection = computed(() => isPlayback.value ? playbackConnection.value : runs.connection)
 const message = computed(() => isPlayback.value ? playbackMessage.value : runs.connectionMessage)
 const accepted = computed(() => store.value.candidates.filter((item) => item.verdict === 'accepted'))
@@ -33,26 +115,7 @@ const rejected = computed(() => store.value.candidates.filter((item) => item.ver
 
 onMounted(async () => {
   if (isDemo.value) {
-    playbackStore.reset()
-    const replayToken = `${runId.value}:${Date.now()}`
-    currentReplayToken = replayToken
-    playbackConnection.value = 'replay'
-    playbackMessage.value = '离线回放播放中'
-    try {
-      await replayEventLog(demoEvents, playbackStore.applyEvent, {
-        speed: 1.35,
-        signal: replayController.signal,
-        runToken: replayToken,
-        isCurrent: (token) => token === currentReplayToken,
-      })
-      if (replayController.signal.aborted) return
-      playbackConnection.value = 'closed'
-      playbackMessage.value = '离线回放已完成'
-    } catch {
-      if (replayController.signal.aborted) return
-      playbackConnection.value = 'error'
-      playbackMessage.value = '演示事件文件无法解析'
-    }
+    startDemoReplay()
     return
   }
   if (isServerReplay.value) {
@@ -83,8 +146,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  currentReplayToken = ''
-  replayController.abort()
+  localReplayController?.dispose()
+  replayElapsedClock.finish()
+  stopReplayTimer()
   serverReplaySubscription?.close()
 })
 </script>
@@ -95,6 +159,18 @@ onBeforeUnmount(() => {
       <div><span class="eyebrow">审查运行中</span><h1>{{ store.title || 'AI 代码审查进行中' }}</h1><p><span>{{ store.repository || runId }}</span><code>{{ runId }}</code></p></div>
       <div class="run-actions"><span class="connection-pill" :class="connection" role="status" aria-live="polite"><i />{{ message }}</span><BudgetMeter :started-at="store.startedAt" :completed-at="store.completedAt" /></div>
     </section>
+    <ReplayControls
+      v-if="isDemo"
+      :speed="replaySpeed"
+      :paused="replayPaused"
+      :skip-idle="skipIdle"
+      :original-elapsed-ms="originalReplayElapsedMs"
+      :replay-elapsed-ms="replayElapsedMs"
+      @update:speed="updateReplaySpeed"
+      @update:paused="updateReplayPaused"
+      @update:skip-idle="updateSkipIdle"
+      @restart="startDemoReplay"
+    />
     <StageProgress :stages="store.stages" />
     <div class="review-layout">
       <div class="review-main">
@@ -112,7 +188,7 @@ onBeforeUnmount(() => {
         <section class="run-summary panel">
           <span class="eyebrow">运行快照</span><h2>公开状态摘要</h2>
           <dl><div><dt>公开事件</dt><dd>{{ store.events.length }}</dd></div><div><dt>候选问题</dt><dd>{{ store.candidates.length }}</dd></div><div><dt>最终 Finding</dt><dd>{{ store.findings.length }}</dd></div><div><dt>当前序号</dt><dd>#{{ store.lastSequence }}</dd></div></dl>
-          <RouterLink v-if="['completed', 'partial', 'failed'].includes(store.status)" class="primary-button compact-button" :to="{ name: 'result', params: { runId }, query: isDemo ? { demo: '1' } : {} }"><span>查看审查报告</span><b>→</b></RouterLink>
+          <RouterLink v-if="['completed', 'partial', 'failed'].includes(store.status)" class="primary-button compact-button" :to="presentReviewResultLink(runId, isServerReplay, isDemo)"><span>查看审查报告</span><b>→</b></RouterLink>
         </section>
       </aside>
     </div>

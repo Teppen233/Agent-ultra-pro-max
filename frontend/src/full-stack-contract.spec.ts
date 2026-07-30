@@ -117,7 +117,7 @@ describe('Task13 全栈公开契约', () => {
 
     store.reset()
     await replayEventLog(log, store.applyEvent, {
-      speed: 1000,
+      speed: 8,
       wait: async () => undefined,
     })
 

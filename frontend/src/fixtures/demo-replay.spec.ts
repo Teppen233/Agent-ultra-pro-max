@@ -11,7 +11,7 @@ describe('完整离线 Demo Replay', () => {
     const store = useReviewStore()
 
     await replayEventLog(demoEvents, store.applyEvent, {
-      speed: 100,
+      speed: 8,
       wait: async () => undefined,
     })
 

@@ -41,6 +41,196 @@ interface ReplayOptions {
   isCurrent?: (token: string) => boolean
 }
 
+/** 前后端共同支持的回放倍速，避免演示与历史回放出现不一致的隐式速度。 */
+export const supportedReplaySpeeds = [0.5, 1, 2, 4, 8] as const
+export type ReplaySpeed = typeof supportedReplaySpeeds[number]
+
+interface ReplayControllerOptions {
+  wait?: (milliseconds: number) => Promise<void>
+}
+
+export interface ReplayController {
+  readonly finished: Promise<void>
+  speed: ReplaySpeed
+  skipIdle: boolean
+  play(): void
+  pause(): void
+  restart(): void
+  dispose(): void
+  setSpeed(speed: number): void
+}
+
+const assertReplaySpeed = (speed: number): ReplaySpeed => {
+  if (!supportedReplaySpeeds.includes(speed as ReplaySpeed)) {
+    throw new Error('回放速度仅支持 0.5、1、2、4、8 倍。')
+  }
+  return speed as ReplaySpeed
+}
+
+/**
+ * 以稳定事件顺序驱动本地回放；改变速度只影响后续等待，不会重置已应用事件。
+ * `skipIdle` 为真时把超过一秒的事件间隔压缩到一秒。
+ */
+export const createReplayController = (
+  sourceEvents: PipelineEvent[],
+  onEvent: (event: PipelineEvent) => void,
+  options: ReplayControllerOptions = {},
+): ReplayController => {
+  const events = [...sourceEvents].sort((left, right) => (
+    Date.parse(left.timestamp) - Date.parse(right.timestamp) || left.sequence - right.sequence
+  ))
+  const wait = options.wait ?? ((milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds)))
+  let position = 0
+  let active = false
+  let processing = false
+  let disposed = false
+  let speed: ReplaySpeed = 1
+  let skipIdle = false
+  let resume: (() => void) | undefined
+  let finished = Promise.resolve()
+  let resolveFinished: (() => void) | undefined
+  let generation = 0
+  let cancelCurrent: (() => void) | undefined
+
+  const createFinished = (): void => {
+    finished = new Promise<void>((resolve) => { resolveFinished = resolve })
+  }
+
+  interface PlaybackGeneration {
+    id: number
+    cancelled: Promise<void>
+    cancel(): void
+  }
+
+  const createGeneration = (): PlaybackGeneration => {
+    let resolveCancelled: (() => void) | undefined
+    const cancelled = new Promise<void>((resolve) => { resolveCancelled = resolve })
+    const id = generation + 1
+    generation = id
+    return { id, cancelled, cancel: () => resolveCancelled?.() }
+  }
+
+  const isCurrent = (playback: PlaybackGeneration): boolean =>
+    !disposed && playback.id === generation
+
+  const waitForResume = async (playback: PlaybackGeneration): Promise<boolean> => {
+    while (isCurrent(playback) && !active) {
+      await Promise.race([
+        new Promise<void>((resolve) => { resume = resolve }),
+        playback.cancelled,
+      ])
+    }
+    return isCurrent(playback)
+  }
+
+  const waitForDelay = async (milliseconds: number, playback: PlaybackGeneration): Promise<boolean> => {
+    await Promise.race([wait(milliseconds), playback.cancelled])
+    return isCurrent(playback)
+  }
+
+  const run = async (playback: PlaybackGeneration): Promise<void> => {
+    processing = true
+    try {
+      while (isCurrent(playback) && position < events.length) {
+        if (!await waitForResume(playback)) return
+        const previous = position > 0 ? events[position - 1] : undefined
+        const event = events[position]
+        if (!event) return
+        if (previous) {
+          const interval = Math.max(0, Date.parse(event.timestamp) - Date.parse(previous.timestamp))
+          const duration = skipIdle ? Math.min(interval, 1_000) : interval
+          if (duration > 0 && !await waitForDelay(duration / speed, playback)) return
+          if (!await waitForResume(playback)) return
+        }
+        if (!isCurrent(playback)) return
+        onEvent(event)
+        if (!isCurrent(playback)) return
+        position += 1
+      }
+    } finally {
+      if (playback.id === generation) {
+        active = false
+        processing = false
+        resolveFinished?.()
+      }
+    }
+  }
+
+  const start = (): void => {
+    const playback = createGeneration()
+    createFinished()
+    active = true
+    processing = true
+    cancelCurrent = playback.cancel
+    void run(playback)
+  }
+
+  const play = (): void => {
+    if (disposed || position >= events.length) return
+    active = true
+    resume?.()
+    resume = undefined
+    if (!processing) start()
+  }
+
+  return {
+    get finished() { return finished },
+    get speed() { return speed },
+    set speed(value: ReplaySpeed) { speed = assertReplaySpeed(value) },
+    get skipIdle() { return skipIdle },
+    set skipIdle(value: boolean) { skipIdle = value },
+    play,
+    pause: () => { active = false },
+    restart: () => {
+      if (disposed) return
+      cancelCurrent?.()
+      resume?.()
+      resume = undefined
+      position = 0
+      processing = false
+      start()
+    },
+    dispose: () => {
+      if (disposed) return
+      disposed = true
+      active = false
+      cancelCurrent?.()
+      resume?.()
+      resume = undefined
+      resolveFinished?.()
+    },
+    setSpeed: (value: number) => { speed = assertReplaySpeed(value) },
+  }
+}
+
+/** 只累计实际播放的墙钟时间，暂停和完成后保持冻结。 */
+export const createReplayElapsedClock = (now: () => number = Date.now) => {
+  let accumulated = 0
+  let startedAt: number | undefined
+  let terminal = false
+  const freeze = (): void => {
+    if (startedAt === undefined) return
+    accumulated += Math.max(0, now() - startedAt)
+    startedAt = undefined
+  }
+  return {
+    start: (): void => {
+      accumulated = 0
+      terminal = false
+      startedAt = now()
+    },
+    pause: freeze,
+    resume: (): void => {
+      if (!terminal && startedAt === undefined) startedAt = now()
+    },
+    finish: (): void => {
+      freeze()
+      terminal = true
+    },
+    value: (): number => accumulated + (startedAt === undefined ? 0 : Math.max(0, now() - startedAt)),
+  }
+}
+
 interface PollOptions {
   fetcher?: Fetcher
   wait?: (milliseconds: number) => Promise<void>
@@ -267,8 +457,7 @@ export const replayEventLog = async (
   onEvent: (event: PipelineEvent) => void,
   options: ReplayOptions = {},
 ): Promise<void> => {
-  const speed = options.speed ?? 4
-  if (!Number.isFinite(speed) || speed <= 0) throw new Error('回放速度必须大于零。')
+  const speed = assertReplaySpeed(options.speed ?? 4)
   const wait = options.wait ?? ((milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds)))
   const events = parseEventLog(content)
   let previous: PipelineEvent | undefined

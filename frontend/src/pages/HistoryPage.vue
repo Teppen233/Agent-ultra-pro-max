@@ -47,8 +47,8 @@ const replayRun = async (runId: string): Promise<void> => {
     <section class="history-layout">
       <div class="panel run-list">
         <div class="section-heading"><div><span class="eyebrow">回放记录</span><h2>历史运行</h2></div><span>{{ runs.length + 1 }} 个可回放记录</span></div>
-        <article class="run-row featured"><span class="run-avatar">演</span><div class="run-meta"><strong>acme/payments-api <em>离线演示数据</em></strong><small>批量退款与租户隔离 · 内置公开事件 fixture</small></div><div class="run-outcome"><span class="critical-dot" />1 严重 · 1 已拒绝</div><div class="run-time">演示 6.0s</div><button @click="replayDemo">回放 ▶</button></article>
-        <article v-for="run in runs" :key="run.run_id" class="run-row"><span class="run-avatar">审</span><div class="run-meta"><strong>{{ run.run_id }}</strong><small>持久化公开事件运行</small></div><div class="run-outcome"><span class="success-dot" />{{ run.status }}</div><div class="run-time">服务端回放</div><button @click="replayRun(run.run_id)">回放 ▶</button></article>
+        <article class="run-row featured"><span class="run-avatar">演</span><div class="run-meta"><strong>acme/payments-api <em>离线演示数据</em></strong><small>批量退款与租户隔离 · 内置公开事件 fixture</small></div><div class="run-outcome"><span class="critical-dot" />1 严重 · 1 已拒绝</div><div class="run-time">演示 6.0s</div><button @click="replayDemo">回放过程 ▶</button></article>
+        <article v-for="run in runs" :key="run.run_id" class="run-row"><span class="run-avatar">审</span><div class="run-meta"><strong>{{ run.run_id }}</strong><small>持久化公开事件运行</small></div><div class="run-outcome"><span class="success-dot" />{{ run.status }}</div><div class="run-time">服务端回放</div><button @click="replayRun(run.run_id)">回放过程 ▶</button></article>
       </div>
     </section>
   </div>

@@ -1,10 +1,26 @@
+<script lang="ts">
+import type { ReviewResult } from '@/contracts'
+
+/** 将报告页的任意可见状态统一映射到同一运行的审查过程。 */
+export const presentResultProcessLink = (
+  runId: string,
+  _status: 'pending' | ReviewResult['status'],
+  query: Record<string, unknown> = {},
+) => {
+  const replayQuery = query.demo === '1' ? { demo: '1' } : query.replay === '1' ? { replay: '1' } : {}
+  return {
+    label: '返回审查过程',
+    to: { name: 'review', params: { runId }, query: replayQuery },
+  }
+}
+</script>
+
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { pollReviewResult, reportUrl } from '@/api/client'
 import FindingCard from '@/components/FindingCard.vue'
-import type { ReviewResult } from '@/contracts'
 import { presentResultMetrics, presentResultStatus, shouldFetchFinalResult } from '@/pages/view-models'
 import { useReviewStore } from '@/stores/review'
 
@@ -30,6 +46,11 @@ const terminalStatus = computed<ReviewResult['status']>(() => {
   if (store.status === 'partial' || store.status === 'failed') return store.status
   return 'completed'
 })
+const processLink = computed(() => presentResultProcessLink(
+  runId.value,
+  loadState.value === 'ready' ? terminalStatus.value : loadState.value === 'pending' ? 'pending' : 'failed',
+  route.query,
+))
 const statusView = computed(() => presentResultStatus(terminalStatus.value, isDemo.value))
 const metrics = computed(() => presentResultMetrics({
   isDemo: isDemo.value,
@@ -83,13 +104,14 @@ onBeforeUnmount(() => controller.abort())
       <div v-if="loadState === 'loading' || loadState === 'pending'"><span class="eyebrow">最终报告</span><h1>{{ pendingText }}</h1><p>运行中状态不会被当作完整报告，页面会在终态结果生成后自动更新。</p></div>
       <div v-else-if="loadState === 'failed'"><span class="eyebrow">审查失败</span><h1>审查已失败，未生成完整报告</h1><p>服务端仅返回失败状态，没有可安全展示的完整结果。</p></div>
       <div v-else><span class="eyebrow">报告获取失败</span><h1>暂时无法加载最终报告</h1><p class="form-error">{{ error }}</p></div>
+      <RouterLink class="secondary-button" :to="processLink.to">{{ processLink.label }}</RouterLink>
     </section>
 
     <template v-else>
       <section class="result-hero panel" :class="statusView.tone">
         <div class="result-icon" :class="statusView.tone"><svg viewBox="0 0 24 24"><template v-if="statusView.tone === 'success'"><path d="m5 12 4 4L19 6" /><circle cx="12" cy="12" r="10" /></template><path v-else-if="statusView.tone === 'warning'" d="M12 3 2 21h20L12 3Zm0 6v5m0 3h.01" /><template v-else><path d="m8 8 8 8m0-8-8 8" /><circle cx="12" cy="12" r="10" /></template></svg></div>
         <div><span class="eyebrow">{{ statusView.eyebrow }}</span><h1>{{ statusView.summaryLead }} <em>{{ store.findings.length }}</em> {{ statusView.summaryUnit }}</h1><p>{{ store.repository || runId }} · {{ statusView.rejectedPrefix }} {{ rejectedCount }} 个拒绝候选 <b v-if="metrics.demoLabel">· {{ metrics.demoLabel }}</b></p></div>
-        <div class="result-actions"><a v-if="!isDemo" class="secondary-button" :href="reportUrl(runId)" target="_blank">查看 Markdown</a><RouterLink class="primary-button compact-button" to="/"><span>新建审查</span><b>＋</b></RouterLink></div>
+        <div class="result-actions"><RouterLink class="secondary-button" :to="processLink.to">{{ processLink.label }}</RouterLink><a v-if="!isDemo" class="secondary-button" :href="reportUrl(runId)" target="_blank">查看 Markdown</a><RouterLink class="primary-button compact-button" to="/"><span>新建审查</span><b>＋</b></RouterLink></div>
       </section>
       <section class="metric-grid">
         <article><small>最终问题</small><strong>{{ store.findings.length }}</strong><span>{{ statusView.findingNote }}</span></article>

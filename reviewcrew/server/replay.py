@@ -10,13 +10,14 @@ from reviewcrew.events import PipelineEvent
 
 
 Sleep = Callable[[float], Awaitable[None]]
+SUPPORTED_REPLAY_SPEEDS = frozenset({0.5, 1.0, 2.0, 4.0, 8.0})
 
 
 def validate_replay_speed(speed: float) -> float:
-    """返回合法回放倍速，并拒绝零、负数及非有限数值。"""
+    """返回固定档位的合法回放倍速，并拒绝其余数值。"""
 
-    if not math.isfinite(speed) or speed <= 0:
-        raise ValueError("回放速度必须是大于零的有限数值。")
+    if not math.isfinite(speed) or speed not in SUPPORTED_REPLAY_SPEEDS:
+        raise ValueError("回放速度仅支持 0.5、1、2、4、8 倍。")
     return speed
 
 

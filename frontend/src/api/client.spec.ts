@@ -70,6 +70,11 @@ describe('API Client', () => {
     expect(wait).toHaveBeenCalledWith(1000)
   })
 
+  it('离线回放与服务端一致，只接受固定的五档倍速', async () => {
+    await expect(replayEventLog(JSON.stringify(publicEvent), () => undefined, { speed: 3 }))
+      .rejects.toThrow('回放速度仅支持')
+  })
+
   it('收到终态后主动关闭 EventSource，避免断线重连污染终态', () => {
     const source = {
       onopen: null as (() => void) | null,

@@ -578,7 +578,7 @@ async def test_replay_sorts_stably_and_scales_delays_with_injected_sleep() -> No
     assert sleeps == [0.0, 2.0]
 
 
-@pytest.mark.parametrize("speed", [0, -1, math.inf, -math.inf, math.nan])
+@pytest.mark.parametrize("speed", [0, -1, 3, math.inf, -math.inf, math.nan])
 @pytest.mark.asyncio
 async def test_replay_rejects_non_positive_or_non_finite_speed(speed: float) -> None:
     with pytest.raises(ValueError, match="回放速度"):
@@ -593,7 +593,7 @@ def test_replay_endpoint_uses_pipeline_event_sse_and_rejects_infinite_speed(tmp_
     app = create_app(config=Config(runs_dir=store.root), event_store=store)
 
     with TestClient(app) as client:
-        replay = client.get(f"/api/replays/{run_id}/events?speed=1000000")
+        replay = client.get(f"/api/replays/{run_id}/events?speed=8")
         invalid = client.get(f"/api/replays/{run_id}/events?speed=inf")
 
     assert [item["type"] for item in _parse_sse(replay.text)] == [
@@ -601,4 +601,4 @@ def test_replay_endpoint_uses_pipeline_event_sse_and_rejects_infinite_speed(tmp_
         "review.completed",
     ]
     assert invalid.status_code == 422
-    assert invalid.json() == {"detail": "回放速度必须是大于零的有限数值。"}
+    assert invalid.json() == {"detail": "回放速度仅支持 0.5、1、2、4、8 倍。"}
