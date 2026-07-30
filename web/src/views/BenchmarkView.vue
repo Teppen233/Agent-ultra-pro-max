@@ -1,120 +1,299 @@
 <script setup lang="ts">
-import { BarChart3, CheckCircle2, Clock3, Crosshair } from 'lucide-vue-next'
-import { NDataTable, NEmpty, NSkeleton, NTag, useMessage, type DataTableColumns } from 'naive-ui'
-import { computed, h, onMounted, ref } from 'vue'
-import VChart from 'vue-echarts'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { HeatmapChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
-import type { EChartsOption } from 'echarts'
+import {
+  BarChart3,
+  CheckCircle2,
+  CircleX,
+  Clock3,
+  ExternalLink,
+  GitPullRequest,
+  ShieldAlert,
+} from 'lucide-vue-next'
+import { NEmpty, NSkeleton, NTag, useMessage } from 'naive-ui'
+import { computed, onMounted, ref } from 'vue'
 
-import type { BenchmarkRow, Category } from '@/types'
-import { uiTokens } from '@/theme'
+import FindingCard from '@/components/FindingCard.vue'
+import type {
+  BenchmarkCollection,
+  BenchmarkEntrySummary,
+  Finding,
+  PipelineEvent,
+  RunDetail,
+  Severity,
+  Verdict,
+} from '@/types'
 
-use([CanvasRenderer, HeatmapChart, GridComponent, TooltipComponent, VisualMapComponent])
-
-interface BenchmarkPayload {
-  available: boolean
-  summary: string | null
-  results: BenchmarkRow[]
+interface BenchmarkDetail {
+  entry: BenchmarkEntrySummary
+  run: RunDetail
 }
 
-const loading = ref(true)
-const rows = ref<BenchmarkRow[]>([])
-const available = ref(false)
 const message = useMessage()
+const collectionLoading = ref(true)
+const detailLoading = ref(false)
+const entries = ref<BenchmarkEntrySummary[]>([])
+const capacity = ref(5)
+const selectedRunId = ref<string | null>(null)
+const selectedRun = ref<RunDetail | null>(null)
+let detailRequestToken = 0
 
-const demoRows: BenchmarkRow[] = [
-  { repo: 'django/django', pr_url: '#18421', category: 'security', hit: true, reason: 'line_overlap', finding_count: 3, elapsed_seconds: 341 },
-  { repo: 'gin-gonic/gin', pr_url: '#3912', category: 'logic', hit: true, reason: 'semantic_match', finding_count: 4, elapsed_seconds: 288 },
-  { repo: 'denoland/deno', pr_url: '#24680', category: 'memory', hit: false, reason: 'miss', finding_count: 2, elapsed_seconds: 407 },
-  { repo: 'tokio-rs/tokio', pr_url: '#7124', category: 'architecture', hit: true, reason: 'line_overlap', finding_count: 5, elapsed_seconds: 372 },
-  { repo: 'spring-projects/spring', pr_url: '#32990', category: 'static', hit: true, reason: 'line_overlap', finding_count: 2, elapsed_seconds: 315 },
-]
+const selectedEntry = computed(
+  () => entries.value.find((entry) => entry.run_id === selectedRunId.value) ?? null,
+)
 
-const displayRows = computed(() => (rows.value.length ? rows.value : demoRows))
-const hitRate = computed(() => displayRows.value.filter((row) => row.hit).length / displayRows.value.length)
-const averageFindings = computed(() => displayRows.value.reduce((sum, row) => sum + row.finding_count, 0) / displayRows.value.length)
-const averageMinutes = computed(() => displayRows.value.reduce((sum, row) => sum + row.elapsed_seconds, 0) / displayRows.value.length / 60)
+const findings = computed(() => deriveFindings(selectedRun.value?.events ?? []))
+const keptCount = computed(
+  () => findings.value.filter((finding) => finding.verdict !== 'reject').length,
+)
+const rejectedCount = computed(
+  () => findings.value.filter((finding) => finding.verdict === 'reject').length,
+)
+const elapsedSeconds = computed(() => {
+  const events = selectedRun.value?.events ?? []
+  if (events.length < 2) return 0
+  const timestamps = events.map((event) => event.timestamp)
+  return Math.max(0, Math.max(...timestamps) - Math.min(...timestamps))
+})
+const severityCounts = computed<Record<Severity, number>>(() => {
+  const counts: Record<Severity, number> = { critical: 0, high: 0, medium: 0, low: 0 }
+  for (const finding of findings.value) counts[finding.severity] += 1
+  return counts
+})
 
-const categories: Category[] = ['security', 'logic', 'memory', 'architecture', 'static']
-const categoryLabels: Record<Category, string> = {
-  security: '安全',
-  logic: '逻辑',
-  memory: '内存',
-  architecture: '架构',
-  static: '静态检查',
+const severityLabels: Record<Severity, string> = {
+  critical: '严重',
+  high: '高危',
+  medium: '中危',
+  low: '低危',
 }
-const repositories = computed(() => [...new Set(displayRows.value.map((row) => row.repo))])
-const chartOption = computed<EChartsOption>(() => ({
-  backgroundColor: 'transparent',
-  tooltip: { position: 'top' },
-  grid: { top: 18, left: 125, right: 30, bottom: 42 },
-  xAxis: { type: 'category', data: categories.map((category) => categoryLabels[category]), axisLabel: { color: uiTokens.muted }, axisLine: { lineStyle: { color: uiTokens.border } } },
-  yAxis: { type: 'category', data: repositories.value, axisLabel: { color: uiTokens.muted, width: 110, overflow: 'truncate' }, axisLine: { lineStyle: { color: uiTokens.border } } },
-  visualMap: { show: false, min: 0, max: 1, inRange: { color: [uiTokens.surfaceRaised, uiTokens.green] } },
-  series: [{
-    type: 'heatmap',
-    data: displayRows.value.map((row) => [categories.indexOf(row.category), repositories.value.indexOf(row.repo), row.hit ? 1 : 0]),
-    label: { show: true, color: uiTokens.text, formatter: '{@[2]}' },
-    itemStyle: { borderColor: uiTokens.bg, borderWidth: 3, borderRadius: 3 },
-  }],
-}))
 
-const columns: DataTableColumns<BenchmarkRow> = [
-  { title: '仓库', key: 'repo', ellipsis: { tooltip: true } },
-  { title: 'PR', key: 'pr_url', width: 120 },
-  { title: '缺陷类型', key: 'category', width: 120, render: (row) => categoryLabels[row.category] },
-  { title: '结果', key: 'hit', width: 90, render: (row) => h(NTag, { type: row.hit ? 'success' : 'error', bordered: false, size: 'small' }, { default: () => row.hit ? '命中' : '未命中' }) },
-  { title: '问题数', key: 'finding_count', width: 90 },
-  { title: '耗时', key: 'elapsed_seconds', width: 100, render: (row) => `${(row.elapsed_seconds / 60).toFixed(1)} 分钟` },
-]
+function deriveFindings(events: PipelineEvent[]): Finding[] {
+  const report = [...events].reverse().find((event) => event.type === 'report')
+  if (report?.type === 'report' && report.findings) {
+    return report.findings.map((finding) => ({ ...finding }))
+  }
+
+  const candidates: Finding[] = []
+  const verdicts: Verdict[] = []
+  for (const event of events) {
+    if (event.type === 'finding') candidates.push({ ...event.finding })
+    if (event.type === 'verdict') verdicts.push(event.verdict)
+  }
+  for (const verdict of verdicts) {
+    const finding = candidates.find(
+      (candidate) => (candidate.source_id ?? candidate.id) === verdict.finding_id,
+    )
+    if (!finding) continue
+    finding.verdict = verdict.verdict
+    finding.verdict_reason = verdict.reason
+    finding.confidence_adjusted = verdict.confidence_adjusted
+  }
+  return candidates
+}
+
+function statusLabel(status: BenchmarkEntrySummary['status']) {
+  if (status === 'ready') return '已完成'
+  if (status === 'running') return '审计中'
+  return '等待中'
+}
+
+function statusType(status: BenchmarkEntrySummary['status']) {
+  if (status === 'ready') return 'success'
+  if (status === 'running') return 'info'
+  return 'warning'
+}
+
+function formatElapsed(seconds: number) {
+  if (seconds < 60) return `${Math.round(seconds)} 秒`
+  return `${(seconds / 60).toFixed(1)} 分钟`
+}
+
+async function selectEntry(runId: string) {
+  selectedRunId.value = runId
+  selectedRun.value = null
+  const token = ++detailRequestToken
+  const entry = entries.value.find((item) => item.run_id === runId)
+  if (!entry || entry.status !== 'ready') {
+    detailLoading.value = false
+    return
+  }
+
+  detailLoading.value = true
+  try {
+    const response = await fetch(`/api/benchmark/entries/${encodeURIComponent(runId)}`)
+    if (!response.ok) throw new Error('审计结果加载失败')
+    const payload = (await response.json()) as BenchmarkDetail
+    if (token !== detailRequestToken || selectedRunId.value !== runId) return
+    selectedRun.value = payload.run
+  } catch (error: unknown) {
+    if (token !== detailRequestToken) return
+    message.error(error instanceof Error ? error.message : '审计结果加载失败')
+  } finally {
+    if (token === detailRequestToken) detailLoading.value = false
+  }
+}
 
 onMounted(async () => {
   try {
-    const response = await fetch('/api/benchmark/latest')
-    if (!response.ok) throw new Error('评测接口暂不可用')
-    const payload = (await response.json()) as BenchmarkPayload
-    available.value = payload.available
-    rows.value = payload.results
+    const response = await fetch('/api/benchmark/entries')
+    if (!response.ok) throw new Error('Benchmark 列表加载失败')
+    const payload = (await response.json()) as BenchmarkCollection
+    capacity.value = payload.capacity
+    entries.value = payload.entries
+    if (payload.entries[0]) await selectEntry(payload.entries[0].run_id)
   } catch (error: unknown) {
-    message.error(error instanceof Error ? error.message : 'Benchmark 加载失败')
+    message.error(error instanceof Error ? error.message : 'Benchmark 列表加载失败')
   } finally {
-    loading.value = false
+    collectionLoading.value = false
   }
 })
 </script>
 
 <template>
-  <div class="benchmark-page">
-    <header class="benchmark-header">
-      <span><BarChart3 :size="15" /> Greptile 评测</span>
-      <div>
-        <h1>评测仪表盘</h1><NTag v-if="!available" size="small" :bordered="false">
-          演示数据
-        </NTag>
+  <main class="benchmark-page">
+    <header class="page-header">
+      <div class="heading-copy">
+        <span class="eyebrow"><BarChart3 :size="15" /> SAVED AUDITS</span>
+        <h1>Benchmark 审计集</h1>
+        <p>查看已加入 Benchmark 的原始审计结果</p>
+      </div>
+      <div class="capacity">
+        <strong>{{ entries.length }} / {{ capacity }}</strong>
+        <span>仓库名额</span>
       </div>
     </header>
-    <section class="metric-band">
-      <article><CheckCircle2 :size="18" /><span>目标漏洞命中率</span><strong>{{ (hitRate * 100).toFixed(0) }}%</strong><small>目标 ≥ 60%</small></article>
-      <article><Crosshair :size="18" /><span>平均问题数</span><strong>{{ averageFindings.toFixed(1) }}</strong><small>目标 ≤ 8</small></article>
-      <article><Clock3 :size="18" /><span>平均耗时</span><strong>{{ averageMinutes.toFixed(1) }} 分钟</strong><small>目标 ≤ 8 分钟</small></article>
+
+    <section v-if="collectionLoading" class="loading-layout" aria-label="正在加载 Benchmark">
+      <NSkeleton height="22rem" :sharp="false" />
+      <NSkeleton height="22rem" :sharp="false" />
     </section>
-    <section class="benchmark-grid">
-      <div class="chart-panel">
-        <header><h2>仓库 × 缺陷类型</h2><span>命中矩阵</span></header>
-        <NSkeleton v-if="loading" height="22rem" :sharp="true" />
-        <VChart v-else class="heatmap" :option="chartOption" autoresize />
-      </div>
-      <div class="table-panel">
-        <header><h2>PR 评测明细</h2><span>{{ displayRows.length }} 个案例</span></header>
-        <NSkeleton v-if="loading" height="18rem" :sharp="true" />
-        <NDataTable v-else-if="displayRows.length" :columns="columns" :data="displayRows" :bordered="false" :single-line="false" :scroll-x="720" />
-        <NEmpty v-else description="运行 benchmark harness 后将在此展示结果" />
-      </div>
+
+    <section v-else-if="entries.length === 0" class="empty-state">
+      <NEmpty description="还没有加入 Benchmark 的审计">
+        <template #extra>
+          <p>在审计页提交 GitHub PR 时勾选“加入 Benchmark”，完成后即可在这里查看结果。</p>
+          <RouterLink to="/review">
+            前往审计页
+          </RouterLink>
+        </template>
+      </NEmpty>
     </section>
-  </div>
+
+    <section v-else class="browser-layout">
+      <aside class="repository-panel">
+        <header>
+          <div>
+            <h2>已加入仓库</h2>
+            <span>选择一个 PR 查看结果</span>
+          </div>
+          <NTag size="small" :bordered="false">
+            {{ entries.length }}
+          </NTag>
+        </header>
+        <nav aria-label="Benchmark 仓库">
+          <button
+            v-for="entry in entries"
+            :key="entry.run_id"
+            type="button"
+            class="repository-item"
+            :class="{ selected: entry.run_id === selectedRunId }"
+            :aria-pressed="entry.run_id === selectedRunId"
+            @click="selectEntry(entry.run_id)"
+          >
+            <span class="repository-icon"><GitPullRequest :size="17" /></span>
+            <span class="repository-copy">
+              <strong>{{ entry.repository_name }}</strong>
+              <small>{{ entry.repository }} · PR #{{ entry.pr_number }}</small>
+            </span>
+            <NTag :type="statusType(entry.status)" size="small" :bordered="false">
+              {{ statusLabel(entry.status) }}
+            </NTag>
+          </button>
+        </nav>
+      </aside>
+
+      <section class="result-panel">
+        <template v-if="selectedEntry">
+          <header class="result-header">
+            <div>
+              <span>{{ selectedEntry.repository }}</span>
+              <h2>{{ selectedEntry.repository_name }} · PR #{{ selectedEntry.pr_number }}</h2>
+            </div>
+            <RouterLink
+              :to="`/review/${selectedEntry.run_id}`"
+              class="audit-link"
+              aria-label="查看完整审计"
+            >
+              <ExternalLink :size="15" />
+              查看完整审计
+            </RouterLink>
+          </header>
+
+          <div v-if="selectedEntry.status !== 'ready'" class="pending-result">
+            <div class="pending-copy">
+              <Clock3 :size="18" />
+              <div>
+                <strong>{{ statusLabel(selectedEntry.status) }}</strong>
+                <span>审计完成后将在这里显示原始结果，无需重新运行。</span>
+              </div>
+            </div>
+            <NSkeleton text :repeat="6" />
+          </div>
+
+          <div v-else-if="detailLoading" class="detail-loading" aria-label="正在加载审计结果">
+            <NSkeleton height="6rem" :sharp="false" />
+            <NSkeleton text :repeat="8" />
+          </div>
+
+          <template v-else-if="selectedRun">
+            <div class="metric-strip">
+              <article>
+                <ShieldAlert :size="17" />
+                <span>全部问题</span>
+                <strong>{{ findings.length }}</strong>
+              </article>
+              <article>
+                <CheckCircle2 :size="17" />
+                <span>保留</span>
+                <strong>{{ keptCount }}</strong>
+              </article>
+              <article>
+                <CircleX :size="17" />
+                <span>已排除</span>
+                <strong>{{ rejectedCount }}</strong>
+              </article>
+              <article>
+                <Clock3 :size="17" />
+                <span>审计耗时</span>
+                <strong>{{ formatElapsed(elapsedSeconds) }}</strong>
+              </article>
+            </div>
+
+            <div class="severity-row" aria-label="严重级别分布">
+              <span v-for="(label, severity) in severityLabels" :key="severity">
+                <i :data-severity="severity" />{{ label }} {{ severityCounts[severity] }}
+              </span>
+            </div>
+
+            <div class="findings-section">
+              <header>
+                <h3>审计 Findings</h3>
+                <span>{{ findings.length }} 条原始结果</span>
+              </header>
+              <div v-if="findings.length" class="finding-list scrollbar">
+                <FindingCard
+                  v-for="finding in findings"
+                  :key="finding.id"
+                  :finding="finding"
+                  :run-id="selectedEntry.run_id"
+                />
+              </div>
+              <NEmpty v-else description="该次审计没有发现需要展示的问题" />
+            </div>
+          </template>
+        </template>
+      </section>
+    </section>
+  </main>
 </template>
 
 <style scoped>
@@ -123,121 +302,363 @@ onMounted(async () => {
   overflow-y: auto;
 }
 
-.benchmark-header {
+.page-header {
+  align-items: center;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
-  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  min-height: 7rem;
   padding: var(--space-4) var(--space-6);
 }
 
-.benchmark-header > span {
+.heading-copy {
+  min-width: 0;
+}
+
+.eyebrow {
   align-items: center;
   color: var(--color-cyan);
   display: flex;
   font-family: var(--font-mono);
   font-size: 0.68rem;
   gap: var(--space-2);
-  text-transform: uppercase;
 }
 
-.benchmark-header div {
+.heading-copy h1 {
+  font-size: 1.45rem;
+  margin: var(--space-1) 0;
+}
+
+.heading-copy p,
+.capacity span,
+.repository-panel header span,
+.result-header span,
+.pending-copy span,
+.findings-section header span {
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  margin: 0;
+}
+
+.capacity {
+  border-left: 1px solid var(--color-border);
+  display: grid;
+  gap: var(--space-1);
+  min-width: 7rem;
+  padding-left: var(--space-5);
+}
+
+.capacity strong {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+}
+
+.loading-layout,
+.browser-layout {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(17rem, 21rem) minmax(0, 1fr);
+  padding: var(--space-5) var(--space-6) var(--space-6);
+}
+
+.empty-state {
+  display: grid;
+  min-height: 24rem;
+  padding: var(--space-6);
+  place-items: center;
+  text-align: center;
+}
+
+.empty-state p {
+  color: var(--color-muted);
+  margin: var(--space-3) auto;
+  max-width: 30rem;
+}
+
+.empty-state a,
+.audit-link {
+  color: var(--color-cyan);
+  font-size: 0.76rem;
+  text-decoration: none;
+}
+
+.empty-state a:hover,
+.audit-link:hover {
+  color: var(--color-text);
+}
+
+.repository-panel,
+.result-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.repository-panel {
+  align-self: start;
+}
+
+.repository-panel > header,
+.result-header,
+.findings-section > header {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-4);
+}
+
+.repository-panel h2,
+.result-header h2,
+.findings-section h3 {
+  font-size: 0.86rem;
+  margin: 0 0 var(--space-1);
+}
+
+.repository-panel nav {
+  display: grid;
+}
+
+.repository-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+  cursor: pointer;
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  min-height: 4.5rem;
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  width: 100%;
+}
+
+.repository-item:last-child {
+  border-bottom: 0;
+}
+
+.repository-item:hover,
+.repository-item.selected {
+  background: var(--color-surface-raised);
+}
+
+.repository-item.selected {
+  box-shadow: inset 0.18rem 0 var(--color-cyan);
+}
+
+.repository-icon {
+  color: var(--color-cyan);
+  display: grid;
+  place-items: center;
+}
+
+.repository-copy {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.repository-copy strong,
+.repository-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository-copy strong {
+  font-size: 0.78rem;
+}
+
+.repository-copy small {
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+
+.result-panel {
+  min-height: 30rem;
+}
+
+.result-header h2 {
+  font-size: 1rem;
+}
+
+.result-header > div {
+  min-width: 0;
+}
+
+.audit-link {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-2);
+}
+
+.pending-result,
+.detail-loading {
+  display: grid;
+  gap: var(--space-6);
+  padding: var(--space-6);
+}
+
+.pending-copy {
   align-items: center;
   display: flex;
   gap: var(--space-3);
 }
 
-.benchmark-header h1 {
-  font-size: 1.5rem;
-  margin: var(--space-1) 0 0;
+.pending-copy > svg {
+  color: var(--color-cyan);
 }
 
-.metric-band {
-  border-bottom: 1px solid var(--color-border);
-  border-top: 1px solid var(--color-border);
+.pending-copy div {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  margin: 0;
-  padding: 0 var(--space-6);
+  gap: var(--space-1);
 }
 
-.metric-band article {
+.metric-strip {
+  border-bottom: 1px solid var(--color-border);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.metric-strip article {
   display: grid;
   gap: var(--space-1);
   grid-template-columns: auto 1fr;
-  min-height: 7.5rem;
-  padding: var(--space-5) var(--space-6);
-}
-
-.metric-band article + article {
-  border-left: 1px solid var(--color-border);
-}
-
-.metric-band svg {
-  color: var(--color-cyan);
-  grid-row: 1 / 4;
-  margin-right: var(--space-3);
-}
-
-.metric-band span,
-.metric-band small {
-  color: var(--color-muted);
-  font-size: 0.72rem;
-}
-
-.metric-band strong {
-  font-family: var(--font-mono);
-  font-size: 1.65rem;
-  line-height: 1.1;
-}
-
-.benchmark-grid {
-  display: grid;
-  gap: var(--space-6);
-  grid-template-columns: minmax(24rem, 0.9fr) minmax(32rem, 1.4fr);
-  padding: var(--space-5) var(--space-6) var(--space-6);
-}
-
-.chart-panel,
-.table-panel {
-  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  min-width: 0;
+  min-height: 6.2rem;
   padding: var(--space-4);
 }
 
-.chart-panel header,
-.table-panel header {
+.metric-strip article + article {
+  border-left: 1px solid var(--color-border);
+}
+
+.metric-strip svg {
+  color: var(--color-cyan);
+  grid-row: 1 / 3;
+  margin-right: var(--space-2);
+}
+
+.metric-strip span {
+  color: var(--color-muted);
+  font-size: 0.68rem;
+}
+
+.metric-strip strong {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+}
+
+.severity-row {
   align-items: center;
   border-bottom: 1px solid var(--color-border);
   display: flex;
-  justify-content: space-between;
-  margin-bottom: var(--space-4);
-  padding-bottom: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  min-height: 3rem;
+  padding: var(--space-2) var(--space-4);
 }
 
-.chart-panel h2,
-.table-panel h2 {
-  font-size: 0.86rem;
-  margin: 0;
-}
-
-.chart-panel header span,
-.table-panel header span {
+.severity-row span {
+  align-items: center;
   color: var(--color-muted);
-  font-family: var(--font-mono);
-  font-size: 0.67rem;
+  display: flex;
+  font-size: 0.68rem;
+  gap: var(--space-2);
 }
 
-.heatmap {
-  height: 23rem;
-  width: 100%;
+.severity-row i {
+  background: var(--color-muted);
+  border-radius: 50%;
+  height: 0.45rem;
+  width: 0.45rem;
 }
 
-@media (max-width: 1250px) {
-  .benchmark-grid {
+.severity-row i[data-severity='critical'] {
+  background: var(--color-red);
+}
+
+.severity-row i[data-severity='high'] {
+  background: var(--color-amber);
+}
+
+.severity-row i[data-severity='medium'] {
+  background: var(--color-blue);
+}
+
+.severity-row i[data-severity='low'] {
+  background: var(--color-green);
+}
+
+.findings-section > header {
+  border-bottom: 0;
+}
+
+.finding-list {
+  display: grid;
+  gap: var(--space-3);
+  max-height: calc(100vh - 27rem);
+  min-height: 12rem;
+  overflow-y: auto;
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+@media (max-width: 68rem) {
+  .loading-layout,
+  .browser-layout {
     grid-template-columns: 1fr;
+  }
+
+  .repository-panel nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .repository-item:nth-child(odd) {
+    border-right: 1px solid var(--color-border);
+  }
+
+  .finding-list {
+    max-height: none;
   }
 }
 
+@media (max-width: 42rem) {
+  .page-header {
+    padding: var(--space-4);
+  }
+
+  .loading-layout,
+  .browser-layout {
+    padding: var(--space-4);
+  }
+
+  .repository-panel nav,
+  .metric-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .repository-item:nth-child(odd) {
+    border-right: 0;
+  }
+
+  .metric-strip article + article {
+    border-left: 0;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .result-header {
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .audit-link {
+    font-size: 0;
+  }
+}
 </style>
