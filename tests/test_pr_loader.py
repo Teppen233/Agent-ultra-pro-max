@@ -52,6 +52,38 @@ async def test_load_github_pr_returns_pr_data(respx_mock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_github_pr_omits_authorization_for_blank_token(
+    monkeypatch: pytest.MonkeyPatch,
+    respx_mock,
+) -> None:
+    """空白 Token 不能生成无效的 GitHub 授权头。"""
+
+    monkeypatch.setenv("REVIEWCREW_GITHUB_TOKEN", "   ")
+    endpoint = "https://api.github.com/repos/acme/demo/pulls/7"
+    route = respx_mock.get(endpoint)
+    route.side_effect = [
+        httpx.Response(
+            200,
+            json={
+                "title": "更新配置",
+                "body": "修正默认值",
+                "user": {"login": "alice"},
+                "base": {"sha": "base123"},
+                "head": {"sha": "head123"},
+            },
+        ),
+        httpx.Response(200, text=SIMPLE_DIFF),
+    ]
+
+    await load_pr(
+        ReviewRequest(pr_url="https://github.com/acme/demo/pull/7"),
+        Config.from_env(),
+    )
+
+    assert all("authorization" not in call.request.headers for call in route.calls)
+
+
+@pytest.mark.asyncio
 async def test_load_local_repo_returns_diff(tmp_path: Path) -> None:
     """本地模式应解析两个引用之间的真实 Git diff。"""
 
@@ -91,4 +123,3 @@ async def test_load_local_repo_rejects_missing_ref(tmp_path: Path) -> None:
             ReviewRequest(repo_path=str(tmp_path), base_ref="missing", head_ref="other"),
             Config(),
         )
-

@@ -40,8 +40,8 @@ async def _load_github(pr_url: str, config: Config) -> PRData:
     owner, repository, number = match.groups()
     endpoint = f"https://api.github.com/repos/{owner}/{repository}/pulls/{number}"
     headers = {"Accept": "application/vnd.github+json"}
-    if config.github_token is not None:
-        headers["Authorization"] = f"Bearer {config.github_token.get_secret_value()}"
+    if token := config.github_token_value():
+        headers["Authorization"] = f"Bearer {token}"
 
     try:
         async with httpx.AsyncClient(timeout=config.pr_load_timeout_seconds) as client:
@@ -129,4 +129,3 @@ async def _git(repo: Path, *arguments: str, timeout: float) -> str:
         summary = message[-1] if message else "未知 Git 错误"
         raise PRLoadError(f"Git 命令失败：{summary}")
     return result.stdout
-

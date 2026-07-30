@@ -15,6 +15,20 @@ def test_config_rejects_invalid_global_timeout(monkeypatch: pytest.MonkeyPatch) 
         Config.from_env()
 
 
+def test_empty_github_token_is_treated_as_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """空白 GitHub Token 必须按未配置处理，避免发送无效授权头。"""
+
+    monkeypatch.setenv("REVIEWCREW_GITHUB_TOKEN", "")
+
+    assert Config.from_env().github_token_value() is None
+
+
+def test_config_defaults_to_eight_concurrent_workers() -> None:
+    """未设置环境变量时应启用八个并发工作槽。"""
+
+    assert Config(_env_file=None).max_concurrency == 8
+
+
 def test_config_exposes_bounded_expert_collaboration_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

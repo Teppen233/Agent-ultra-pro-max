@@ -40,14 +40,14 @@ class Config(BaseSettings):
     intent_model: str | None = None
     verifier_model: str | None = None
 
-    global_timeout_seconds: int = Field(default=600, gt=0)
+    global_timeout_seconds: int = Field(default=600, gt=0, le=600)
     pr_load_timeout_seconds: int = Field(default=30, gt=0)
     context_timeout_seconds: int = Field(default=90, gt=0)
     review_timeout_seconds: int = Field(default=300, gt=0)
     collaboration_window_seconds: float = Field(default=125.0, gt=0)
     verifier_timeout_seconds: int = Field(default=120, gt=0)
     report_timeout_seconds: int = Field(default=30, gt=0)
-    max_concurrency: int = Field(default=4, gt=0, le=32)
+    max_concurrency: int = Field(default=8, gt=0, le=32)
     context_character_budget: int = Field(default=120_000, gt=0)
 
     runs_dir: Path = Path("runs")
@@ -72,3 +72,11 @@ class Config(BaseSettings):
 
         role_model = getattr(self, f"{role}_model")
         return role_model or self.llm_model
+
+    def github_token_value(self) -> str | None:
+        """返回去除首尾空白后的 GitHub Token；空值按未配置处理。"""
+
+        if self.github_token is None:
+            return None
+        value = self.github_token.get_secret_value().strip()
+        return value or None

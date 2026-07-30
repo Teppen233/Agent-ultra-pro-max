@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,25 +12,84 @@ from pathlib import Path
 import pytest
 
 from reviewcrew.config import Config
+from reviewcrew.budget import ReviewBudget
 from reviewcrew.events import EventStore
 from reviewcrew.pipeline.orchestrator import Orchestrator
 from reviewcrew.report import persist_report
 from reviewcrew.schemas import (
     AgentSnapshot,
     Budget,
+    ChangedFile,
     CodeEvidence,
     ContextPack,
     Finding,
     PRData,
     ReviewPlan,
     ReviewRequest,
+    ReviewResult,
     StaticSignal,
     Verdict,
 )
 from reviewcrew.team.publisher import MessagePublisher
 
 
-def make_pr() -> PRData:
+def slow_picklable_report_renderer(result: ReviewResult) -> str:
+    """在子进程记录生命周期，模拟无法在报告窗口内完成的渲染。"""
+
+    marker = Path(os.environ["REVIEWCREW_TEST_RENDER_MARKER"])
+    marker.with_suffix(".started").write_text("started\n", encoding="utf-8")
+    time.sleep(30)
+    marker.with_suffix(".completed").write_text("completed\n", encoding="utf-8")
+    return "渲染过晚"
+
+
+def slow_picklable_report_persister(
+    result: ReviewResult,
+    runs_directory: str | Path,
+) -> tuple[Path, Path]:
+    """在子进程记录生命周期，模拟无法在报告窗口内完成的持久化。"""
+
+    marker = Path(os.environ["REVIEWCREW_TEST_PERSIST_MARKER"])
+    marker.with_suffix(".started").write_text("started\n", encoding="utf-8")
+    time.sleep(30)
+    marker.with_suffix(".completed").write_text("completed\n", encoding="utf-8")
+    return persist_report(result, runs_directory)
+
+
+def short_picklable_report_renderer(result: ReviewResult) -> str:
+    """模拟可序列化且快速完成的报告渲染。"""
+
+    time.sleep(0.03)
+    return "已渲染"
+
+
+def marker_picklable_report_persister(
+    result: ReviewResult,
+    runs_directory: str | Path,
+) -> tuple[Path, Path]:
+    """记录真实子进程调用后持久化报告。"""
+
+    Path(os.environ["REVIEWCREW_TEST_PERSIST_CALL_MARKER"]).write_text(
+        "called\n",
+        encoding="utf-8",
+    )
+    return persist_report(result, runs_directory)
+
+
+def failing_picklable_report_persister(
+    result: ReviewResult,
+    runs_directory: str | Path,
+) -> tuple[Path, Path]:
+    """记录真实子进程调用并模拟持久化失败。"""
+
+    Path(os.environ["REVIEWCREW_TEST_FAILING_PERSIST_MARKER"]).write_text(
+        "called\n",
+        encoding="utf-8",
+    )
+    raise RuntimeError("不可写")
+
+
+def make_pr(*, file_count: int = 0, changed_lines: int = 0) -> PRData:
     """构造不依赖网络和真实仓库的 PR。"""
 
     return PRData(
@@ -38,9 +98,65 @@ def make_pr() -> PRData:
         title="修复鉴权",
         base_sha="base123",
         head_sha="head456",
-        files=[],
+        files=[
+            ChangedFile(
+                path=f"src/module_{index}.py",
+                status="modified",
+                additions=changed_lines if index == 0 else 0,
+            )
+            for index in range(file_count)
+        ],
         raw_diff="+ return repository.get(resource_id)",
     )
+
+
+@pytest.mark.parametrize(
+    ("files", "changed_lines", "expected"),
+    [(2, 80, 240), (6, 600, 420), (14, 2400, 600)],
+)
+def test_review_budget_scales_with_diff_but_never_exceeds_global_limit(
+    files: int,
+    changed_lines: int,
+    expected: int,
+) -> None:
+    """Diff 规模应决定团队软预算，但硬上限固定为十分钟。"""
+
+    budget = ReviewBudget.from_pr(
+        make_pr(file_count=files, changed_lines=changed_lines),
+        Config(global_timeout_seconds=600),
+    )
+
+    assert budget.team_soft_seconds == expected
+    assert budget.hard_seconds == 600
+
+
+def test_explicit_watchdog_override_never_exceeds_ten_minutes() -> None:
+    """测试注入的 watchdog 时长也不能绕过十分钟硬上限。"""
+
+    orchestrator = Orchestrator(
+        Config(_env_file=None, global_timeout_seconds=600),
+        global_timeout_seconds=601,
+    )
+
+    assert orchestrator._global_timeout == 600
+
+
+@pytest.mark.asyncio
+async def test_zero_watchdog_override_falls_back_to_configured_timeout(tmp_path: Path) -> None:
+    """显式传入零仍表示采用配置值，不能让审查立即超时。"""
+
+    result = await Orchestrator(
+        Config(_env_file=None, runs_dir=tmp_path / "runs", global_timeout_seconds=600),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+        global_timeout_seconds=0,
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    assert result.status == "completed"
 
 
 def make_context() -> ContextPack:
@@ -818,8 +934,8 @@ async def test_budget_warning_precedes_cancellation_and_agent_snapshot_is_recove
 
 
 @pytest.mark.asyncio
-async def test_planning_and_verifier_receive_their_own_injected_budgets(tmp_path: Path) -> None:
-    """Team Lead 与 Verifier 的 Budget 必须来自各自阶段配置。"""
+async def test_planning_and_verifier_receive_their_lifecycle_budgets(tmp_path: Path) -> None:
+    """Team Lead 使用规划预算，Verifier watcher 使用团队生命周期预算。"""
 
     observed: dict[str, int] = {}
 
@@ -841,10 +957,71 @@ async def test_planning_and_verifier_receive_their_own_injected_budgets(tmp_path
         defect_factory=lambda publisher: SnapshotExpert("defect"),
         intent_factory=lambda publisher: SnapshotExpert("intent"),
         verifier_factory=lambda publisher: BudgetVerifier(),
-        stage_timeouts={"planning": 7, "verifier": 11},
+        stage_timeouts={"planning": 7, "team_review": 11, "verifier": 1},
     ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
 
     assert observed == {"planning": 7, "verifier": 11}
+
+
+@pytest.mark.asyncio
+async def test_verifier_watcher_uses_team_lifecycle_budget(tmp_path: Path) -> None:
+    """Verifier watcher 必须覆盖团队审查窗口，而非单独的短阶段超时。"""
+
+    observed: dict[str, int] = {}
+
+    class TeamBudgetVerifier(EmptyVerifier):
+        async def watch(self, mailbox, blackboard, budget: Budget, *, stop_event: asyncio.Event, **kwargs: object) -> list[Verdict]:
+            observed["verifier"] = budget.seconds
+            return await super().watch(mailbox, blackboard, budget, stop_event=stop_event, **kwargs)
+
+    await Orchestrator(
+        Config(runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: TeamBudgetVerifier(),
+        stage_timeouts={"team_review": 13, "verifier": 1},
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    assert observed == {"verifier": 13}
+
+
+@pytest.mark.parametrize(
+    ("file_count", "changed_lines", "minimum_budget"),
+    [(6, 600, 419), (14, 2400, 579)],
+)
+@pytest.mark.asyncio
+async def test_default_team_stage_preserves_scaled_budget_for_larger_prs(
+    tmp_path: Path,
+    file_count: int,
+    changed_lines: int,
+    minimum_budget: int,
+) -> None:
+    """默认团队阶段不得把中大型 PR 的规模预算截断为三百秒。"""
+
+    observed: list[int] = []
+
+    async def scaled_loader(request: ReviewRequest, config: Config) -> PRData:
+        return make_pr(file_count=file_count, changed_lines=changed_lines)
+
+    class BudgetVerifier(EmptyVerifier):
+        async def watch(self, mailbox, blackboard, budget: Budget, *, stop_event: asyncio.Event, **kwargs: object) -> list[Verdict]:
+            observed.append(budget.seconds)
+            return await super().watch(mailbox, blackboard, budget, stop_event=stop_event, **kwargs)
+
+    await Orchestrator(
+        Config(_env_file=None, runs_dir=tmp_path / "runs"),
+        pr_loader=scaled_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: BudgetVerifier(),
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    assert observed and observed[0] >= minimum_budget
 
 
 @pytest.mark.asyncio
@@ -882,21 +1059,111 @@ async def test_reporting_timeout_finishes_all_writes_and_persists_same_partial_r
 
 
 @pytest.mark.asyncio
-async def test_elapsed_seconds_includes_report_finalization(tmp_path: Path) -> None:
+async def test_wide_window_terminates_picklable_renderer_without_background_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """剩余时间大于二十秒时，慢渲染也必须真实启动并在截止时终止。"""
+
+    marker = tmp_path / "render"
+    monkeypatch.setenv("REVIEWCREW_TEST_RENDER_MARKER", str(marker))
+    started = time.perf_counter()
+    result = await Orchestrator(
+        Config(_env_file=None, runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+        report_renderer=slow_picklable_report_renderer,
+        stage_timeouts={"reporting": 12},
+        global_timeout_seconds=30,
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 25
+    assert marker.with_suffix(".started").is_file()
+    assert not marker.with_suffix(".completed").exists()
+    assert result.status == "partial"
+    events = Orchestrator.read_events(tmp_path / "runs", result.run_id)
+    assert events[-1].type == "review.completed"
+    assert events[-1].data["status"] == "partial"
+    await asyncio.sleep(0.2)
+    assert not marker.with_suffix(".completed").exists()
+    assert not list((tmp_path / "runs").glob(".report-staging-*"))
+
+
+@pytest.mark.asyncio
+async def test_wide_window_terminates_picklable_persister_and_saves_partial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """剩余时间大于二十秒时，慢持久化必须终止且 partial 回写不能越界。"""
+
+    marker = tmp_path / "persist"
+    monkeypatch.setenv("REVIEWCREW_TEST_PERSIST_MARKER", str(marker))
+    started = time.perf_counter()
+    result = await Orchestrator(
+        Config(_env_file=None, runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+        report_persister=slow_picklable_report_persister,
+        stage_timeouts={"reporting": 12},
+        global_timeout_seconds=30,
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+    elapsed = time.perf_counter() - started
+
+    persisted = json.loads(
+        (tmp_path / "runs" / result.run_id / "result.json").read_text(encoding="utf-8")
+    )
+    assert elapsed < 25
+    assert marker.with_suffix(".started").is_file()
+    assert not marker.with_suffix(".completed").exists()
+    assert result.status == "partial"
+    assert persisted["status"] == "partial"
+    events = Orchestrator.read_events(tmp_path / "runs", result.run_id)
+    assert events[-1].type == "review.completed"
+    assert events[-1].data["status"] == "partial"
+    await asyncio.sleep(0.2)
+    assert not marker.with_suffix(".completed").exists()
+    assert not list((tmp_path / "runs").glob(".report-staging-*"))
+
+
+@pytest.mark.asyncio
+async def test_constrained_report_window_completes_isolated_default_operations(tmp_path: Path) -> None:
+    """截止窗口受限但时间充足时，默认渲染与持久化仍应完成。"""
+
+    result = await Orchestrator(
+        Config(_env_file=None, runs_dir=tmp_path / "runs"),
+        pr_loader=fake_loader,
+        context_builder=fake_context_builder,
+        team_lead=FakeLead([]),
+        defect_factory=lambda publisher: SnapshotExpert("defect"),
+        intent_factory=lambda publisher: SnapshotExpert("intent"),
+        verifier_factory=lambda publisher: EmptyVerifier(),
+        stage_timeouts={"reporting": 20},
+        global_timeout_seconds=30,
+    ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
+
+    assert result.status == "completed"
+    assert (tmp_path / "runs" / result.run_id / "result.json").is_file()
+    assert (tmp_path / "runs" / result.run_id / "report.md").is_file()
+
+
+@pytest.mark.asyncio
+async def test_elapsed_seconds_includes_report_finalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """最终结果与报告中的总耗时必须覆盖报告生成耗时。"""
 
-    calls = 0
-
-    def one_shot_persister(result, runs_directory):
-        nonlocal calls
-        calls += 1
-        if calls > 1:
-            raise RuntimeError("持久化器不可重复调用")
-        return persist_report(result, runs_directory)
-
-    def slow_renderer(result):
-        time.sleep(0.03)
-        return "已渲染"
+    marker = tmp_path / "persist-called"
+    monkeypatch.setenv("REVIEWCREW_TEST_PERSIST_CALL_MARKER", str(marker))
 
     result = await Orchestrator(
         Config(runs_dir=tmp_path / "runs"),
@@ -906,9 +1173,9 @@ async def test_elapsed_seconds_includes_report_finalization(tmp_path: Path) -> N
         defect_factory=lambda publisher: SnapshotExpert("defect"),
         intent_factory=lambda publisher: SnapshotExpert("intent"),
         verifier_factory=lambda publisher: EmptyVerifier(),
-        report_persister=one_shot_persister,
-        report_renderer=slow_renderer,
-        stage_timeouts={"reporting": 1},
+        report_persister=marker_picklable_report_persister,
+        report_renderer=short_picklable_report_renderer,
+        stage_timeouts={"reporting": 20},
     ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
 
     persisted = json.loads(
@@ -916,19 +1183,18 @@ async def test_elapsed_seconds_includes_report_finalization(tmp_path: Path) -> N
     )
     assert result.elapsed_seconds >= 0.03
     assert persisted["elapsed_seconds"] == result.elapsed_seconds
-    assert calls == 1
+    assert marker.is_file()
 
 
 @pytest.mark.asyncio
-async def test_report_commit_failure_returns_partial_without_report_generated_claim(tmp_path: Path) -> None:
+async def test_report_commit_failure_returns_partial_without_report_generated_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """唯一最终提交失败时返回 partial，且不得声称报告存在。"""
 
-    calls = 0
-
-    def failing_persister(result, runs_directory):
-        nonlocal calls
-        calls += 1
-        raise RuntimeError("不可写")
+    marker = tmp_path / "persist-failed"
+    monkeypatch.setenv("REVIEWCREW_TEST_FAILING_PERSIST_MARKER", str(marker))
 
     result = await Orchestrator(
         Config(runs_dir=tmp_path / "runs"),
@@ -938,11 +1204,11 @@ async def test_report_commit_failure_returns_partial_without_report_generated_cl
         defect_factory=lambda publisher: SnapshotExpert("defect"),
         intent_factory=lambda publisher: SnapshotExpert("intent"),
         verifier_factory=lambda publisher: EmptyVerifier(),
-        report_persister=failing_persister,
+        report_persister=failing_picklable_report_persister,
     ).review(ReviewRequest(repo_path=str(tmp_path), base_ref="base", head_ref="head"))
 
     events = Orchestrator.read_events(tmp_path / "runs", result.run_id)
-    assert calls == 1
+    assert marker.is_file()
     assert result.status == "partial"
     assert not (tmp_path / "runs" / result.run_id / "result.json").exists()
     assert not any(event.type == "report.generated" for event in events)
