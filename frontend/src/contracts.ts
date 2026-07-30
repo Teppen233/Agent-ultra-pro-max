@@ -11,6 +11,11 @@ export type EventType =
   | 'agent.candidate'
   | 'agent.completed'
   | 'agent.failed'
+  | 'plan.published'
+  | 'tool.started'
+  | 'tool.completed'
+  | 'tool.failed'
+  | 'mailbox.message'
   | 'verifier.started'
   | 'verifier.accepted'
   | 'verifier.rejected'
@@ -80,6 +85,41 @@ export interface AgentState {
   tools: string[]
   candidateCount: number
   warning?: string
+}
+
+export interface AgentInstanceState {
+  id: string
+  role: AgentRole
+  label: string
+  status: AgentStatus
+  contextId: string
+  files: string[]
+  startedAt: string
+  completedAt?: string
+  tools: string[]
+  toolCount: number
+  mailboxCount: number
+  candidateCount: number
+  warning?: string
+}
+
+export type OperationCategory = 'plan' | 'tool' | 'mailbox' | 'candidate' | 'verdict'
+
+export interface OperationRecord {
+  id: string
+  category: OperationCategory
+  eventType: EventType
+  timestamp: string
+  actor: string
+  actorType?: 'system' | 'agent'
+  action: string
+  target: string
+  status: 'started' | 'completed' | 'failed' | 'published' | 'pending' | 'accepted' | 'rejected'
+  summary: string
+  durationMs?: number
+  resultCount?: number
+  contextId?: string
+  agentId?: string
 }
 
 export interface StageState {

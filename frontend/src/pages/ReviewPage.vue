@@ -12,9 +12,10 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { createReplayController, createReplayElapsedClock, parseEventLog } from '@/api/client'
-import AgentTeamGraph from '@/components/AgentTeamGraph.vue'
+import AgentOperationsGraph from '@/components/AgentOperationsGraph.vue'
 import BudgetMeter from '@/components/BudgetMeter.vue'
 import FindingCard from '@/components/FindingCard.vue'
+import OperationFeed from '@/components/OperationFeed.vue'
 import ReplayControls from '@/components/ReplayControls.vue'
 import StageProgress from '@/components/StageProgress.vue'
 import Timeline from '@/components/Timeline.vue'
@@ -174,7 +175,14 @@ onBeforeUnmount(() => {
     <StageProgress :stages="store.stages" />
     <div class="review-layout">
       <div class="review-main">
-        <AgentTeamGraph :agents="store.agents" />
+        <AgentOperationsGraph
+          :instances="store.agentInstances"
+          :plan-summary="store.planSummary"
+          :candidate-count="store.candidates.length"
+          :verdict-count="accepted.length + rejected.length"
+          :verifier-status="store.agents.verifier.status"
+        />
+        <OperationFeed :operations="store.operations" />
         <section class="verdict-board panel">
           <div class="section-heading"><div><span class="eyebrow">验证队列</span><h2>候选与裁决</h2></div><div class="verdict-counts"><span class="accepted">{{ accepted.length }} 通过</span><span class="rejected">{{ rejected.length }} 拒绝</span></div></div>
           <div v-if="store.candidates.length" class="candidate-grid">

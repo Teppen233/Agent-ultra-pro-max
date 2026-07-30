@@ -20,6 +20,24 @@ const event = (
 describe('Review Store 事件归约', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
+  it('按完整 agent id 保存六个并行专家实例', () => {
+    const store = useReviewStore()
+    const ids = [
+      'defect:ctx-1', 'defect:ctx-2', 'defect:ctx-3',
+      'intent:ctx-1', 'intent:ctx-2', 'intent:ctx-3',
+    ]
+
+    ids.forEach((id, index) => store.applyEvent(event(index + 1, 'agent.started', {
+      agent: id,
+      role: id.split(':')[0],
+      context_id: id.split(':')[1],
+      files: [`src/${id.split(':')[1]}.ts`],
+    })))
+
+    expect(Object.keys((store as unknown as { agentInstances: object }).agentInstances ?? {}))
+      .toEqual(ids)
+  })
+
   it('将启动、候选、拒绝和终态归约为可展示状态', () => {
     const store = useReviewStore()
 

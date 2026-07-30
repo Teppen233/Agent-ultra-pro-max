@@ -2,10 +2,13 @@ import { createPinia, defineStore, getActivePinia, setActivePinia } from 'pinia'
 import type { Pinia } from 'pinia'
 
 import type {
+  AgentInstanceState,
   AgentRole,
   AgentState,
   CandidateRecord,
   Finding,
+  OperationCategory,
+  OperationRecord,
   PipelineEvent,
   ReviewResult,
   ReviewStatus,
@@ -40,6 +43,9 @@ const asString = (value: unknown): string | undefined =>
 const asNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined
 
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
 const resolveRole = (data: Record<string, unknown>, fallback?: AgentRole): AgentRole | undefined => {
   const raw = asString(data.role) ?? asString(data.agent) ?? fallback
   if (raw?.startsWith('defect')) return 'defect'
@@ -62,6 +68,88 @@ const findingFromEvent = (data: Record<string, unknown>): Finding => {
   }
 }
 
+const toolActions: Record<string, string> = {
+  'github.load_pr': '拉取 GitHub PR',
+  'git.load_diff': '读取 Git 差异',
+  'diff.parse': '解析代码差异',
+  'context.read_docs': '读取项目文档',
+  'context.read_file': '读取相关代码',
+  'context.find_tests': '查找相关测试',
+  'context.search_symbol': '搜索符号定义',
+  'static.semgrep': '执行静态扫描',
+  'report.persist': '生成审查报告',
+}
+
+const mailboxActions: Record<string, string> = {
+  candidate_finding: '发布候选问题',
+  evidence_request: '请求补充证据',
+  evidence_response: '返回补证结果',
+  verifier_final: '发布最终裁决',
+  agent_review_completed: '完成专家审查',
+}
+
+export const classifyOperationEvent = (event: PipelineEvent): OperationCategory | undefined => {
+  if (event.type === 'plan.published') return 'plan'
+  if (event.type.startsWith('tool.')) return 'tool'
+  if (event.type === 'mailbox.message') return 'mailbox'
+  if (event.type === 'agent.candidate') return 'candidate'
+  if (event.type === 'verifier.accepted' || event.type === 'verifier.rejected') return 'verdict'
+  return undefined
+}
+
+export const toOperationRecord = (event: PipelineEvent): OperationRecord | undefined => {
+  const category = classifyOperationEvent(event)
+  if (!category) return undefined
+  const data = event.data
+  if (category === 'plan') return {
+    id: event.id, category, eventType: event.type, timestamp: event.timestamp,
+    actor: 'TeamLead', action: '发布审查计划', target: asStringArray(data.context_ids).join('、'),
+    status: 'published', summary: asString(data.summary) ?? '已完成风险路由与上下文分片。',
+  }
+  if (category === 'tool') {
+    const toolName = asString(data.tool_name) ?? 'unknown.tool'
+    const status = event.type === 'tool.started' ? 'started' : event.type === 'tool.failed' ? 'failed' : 'completed'
+    return {
+      id: event.id, category, eventType: event.type, timestamp: event.timestamp,
+      actor: asString(data.actor) ?? '系统', actorType: asString(data.actor_type) as 'system' | 'agent' | undefined,
+      action: toolActions[toolName] ?? `执行 ${toolName}`, target: asString(data.target) ?? '', status,
+      summary: asString(data.summary) ?? (status === 'started' ? '操作已开始。' : status === 'failed' ? '操作未完成。' : '操作已完成。'),
+      durationMs: asNumber(data.duration_ms), resultCount: asNumber(data.result_count),
+      contextId: asString(data.context_id), agentId: asString(data.agent_id),
+    }
+  }
+  if (category === 'mailbox') {
+    const kind = asString(data.kind) ?? ''
+    return {
+      id: event.id, category, eventType: event.type, timestamp: event.timestamp,
+      actor: asString(data.sender) ?? 'Agent', action: mailboxActions[kind] ?? '发送协作消息',
+      target: asString(data.recipient) ?? '', status: 'completed', summary: asString(data.summary) ?? '协作消息已送达。',
+    }
+  }
+  if (category === 'candidate') return {
+    id: event.id, category, eventType: event.type, timestamp: event.timestamp,
+    actor: asString(data.agent) ?? '专家', action: '提交候选问题', target: asString(data.file) ?? '',
+    status: 'pending', summary: `候选 ${asString(data.finding_id) ?? '未知'} 已进入验证队列。`, agentId: asString(data.agent),
+  }
+  const accepted = event.type === 'verifier.accepted'
+  return {
+    id: event.id, category, eventType: event.type, timestamp: event.timestamp,
+    actor: 'Verifier', action: accepted ? '接受候选问题' : '拒绝候选问题',
+    target: asString(data.finding_id) ?? '', status: accepted ? 'accepted' : 'rejected',
+    summary: asString(data.reason) ?? asString(data.verdict) ?? (accepted ? '证据充分，候选成立。' : '证据不足，候选不成立。'),
+  }
+}
+
+export const groupAgentInstances = <T extends Pick<AgentInstanceState, 'id' | 'role' | 'contextId'>>(instances: T[]) => {
+  const groups = new Map<string, T[]>()
+  for (const instance of instances) {
+    const agents = groups.get(instance.contextId) ?? []
+    agents.push(instance)
+    groups.set(instance.contextId, agents)
+  }
+  return [...groups].map(([contextId, agents]) => ({ contextId, agents }))
+}
+
 /**
  * 将实时 SSE 与历史 Replay 归约到同一份展示状态。
  * 归约器只消费公开字段，并按 sequence 保证幂等与终态封口。
@@ -73,6 +161,10 @@ export const useReviewStore = defineStore('review', {
     stage: 'idle' as string,
     stages: initialStages(),
     agents: initialAgents(),
+    agentInstances: {} as Record<string, AgentInstanceState>,
+    operations: [] as OperationRecord[],
+    planSummary: '' as string,
+    planBudgetSeconds: 0,
     candidates: [] as CandidateRecord[],
     findings: [] as Finding[],
     events: [] as PipelineEvent[],
@@ -101,6 +193,8 @@ export const useReviewStore = defineStore('review', {
       this.lastSequence = event.sequence
       this.events.push(event)
       const data = event.data
+      const operation = toOperationRecord(event)
+      if (operation) this.operations.push(operation)
 
       switch (event.type) {
         case 'review.started':
@@ -128,6 +222,8 @@ export const useReviewStore = defineStore('review', {
         case 'agent.started': {
           const role = resolveRole(data)
           if (role) this.agents[role].status = 'running'
+          const agentId = asString(data.agent) ?? role
+          if (agentId && role) this.ensureAgentInstance(agentId, role, data, event.timestamp).status = 'running'
           break
         }
         case 'agent.tool': {
@@ -138,10 +234,12 @@ export const useReviewStore = defineStore('review', {
         }
         case 'agent.candidate': {
           const role = resolveRole(data, 'defect') ?? 'defect'
+          const agentId = asString(data.agent)
           const finding = findingFromEvent(data)
           if (!this.candidates.some((item) => item.finding.id === finding.id)) {
             this.candidates.push({ finding, agent: role, verdict: 'pending' })
             this.agents[role].candidateCount += 1
+            if (agentId) this.ensureAgentInstance(agentId, role, data, event.timestamp).candidateCount += 1
           }
           break
         }
@@ -151,6 +249,38 @@ export const useReviewStore = defineStore('review', {
           if (role) {
             this.agents[role].status = event.type === 'agent.completed' ? 'completed' : 'failed'
             this.agents[role].warning = asString(data.warning)
+            const agentId = asString(data.agent) ?? role
+            const instance = this.ensureAgentInstance(agentId, role, data, event.timestamp)
+            instance.status = event.type === 'agent.completed' ? 'completed' : 'failed'
+            instance.completedAt = event.timestamp
+            instance.warning = asString(data.warning)
+          }
+          break
+        }
+        case 'plan.published':
+          this.planSummary = asString(data.summary) ?? ''
+          this.planBudgetSeconds = asNumber(data.budget_seconds) ?? 0
+          break
+        case 'tool.started':
+        case 'tool.completed':
+        case 'tool.failed': {
+          const agentId = asString(data.agent_id)
+          const role = resolveRole(data, agentId?.startsWith('intent') ? 'intent' : agentId?.startsWith('verifier') ? 'verifier' : agentId ? 'defect' : undefined)
+          if (agentId && role) {
+            const instance = this.ensureAgentInstance(agentId, role, data, event.timestamp)
+            const tool = asString(data.tool_name)
+            if (event.type === 'tool.started') {
+              instance.toolCount += 1
+              if (tool && !instance.tools.includes(tool)) instance.tools.push(tool)
+            }
+          }
+          break
+        }
+        case 'mailbox.message': {
+          const participants = new Set([asString(data.sender), asString(data.recipient)])
+          for (const agentId of participants) {
+            if (!agentId || agentId === '*' || !this.agentInstances[agentId]) continue
+            this.agentInstances[agentId].mailboxCount += 1
           }
           break
         }
@@ -180,6 +310,36 @@ export const useReviewStore = defineStore('review', {
           this.error = asString(data.message) ?? '审查流程未能完成。'
           break
       }
+    },
+
+    ensureAgentInstance(
+      agentId: string,
+      role: AgentRole,
+      data: Record<string, unknown>,
+      timestamp: string,
+    ): AgentInstanceState {
+      const existing = this.agentInstances[agentId]
+      if (existing) {
+        const files = asStringArray(data.files)
+        if (files.length) existing.files = files
+        return existing
+      }
+      const contextId = asString(data.context_id) ?? (agentId.split(':').slice(1).join(':') || 'global')
+      const instance: AgentInstanceState = {
+        id: agentId,
+        role,
+        label: role === 'defect' ? '缺陷专家' : role === 'intent' ? '意图专家' : '独立验证',
+        status: 'waiting',
+        contextId,
+        files: asStringArray(data.files),
+        startedAt: timestamp,
+        tools: [],
+        toolCount: 0,
+        mailboxCount: 0,
+        candidateCount: 0,
+      }
+      this.agentInstances[agentId] = instance
+      return instance
     },
 
     setStageStatus(stage: string, status: StageState['status']): void {

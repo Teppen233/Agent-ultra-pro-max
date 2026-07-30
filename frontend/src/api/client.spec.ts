@@ -56,6 +56,19 @@ describe('API Client', () => {
     expect(parseEventLog(log).map((event) => event.sequence)).toEqual([1, 2])
   })
 
+  it('解析计划、工具与 Mailbox 新事件契约', () => {
+    const types = ['plan.published', 'tool.started', 'tool.completed', 'tool.failed', 'mailbox.message']
+    const log = types.map((type, index) => JSON.stringify({
+      ...publicEvent,
+      id: `evt-contract-${index + 1}`,
+      sequence: index + 1,
+      type,
+      data: {},
+    })).join('\n')
+
+    expect(parseEventLog(log).map((item) => item.type)).toEqual(types)
+  })
+
   it('离线回放按顺序发送事件且可调整速度', async () => {
     const received: number[] = []
     const wait = vi.fn(async () => undefined)
