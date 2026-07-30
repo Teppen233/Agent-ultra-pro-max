@@ -53,10 +53,14 @@ def test_review_accepts_missing_repository_path(
     prepared = tmp_path / "repos" / "owner__repo"
     prepared.mkdir(parents=True)
     preparation_calls: list[tuple[str, str | None, Path]] = []
+    preparation_started = threading.Event()
+    release_preparation = threading.Event()
     reviewed = threading.Event()
 
     def prepare(pr_url: str, repo_path: str | None, repos_dir: Path) -> Path:
         preparation_calls.append((pr_url, repo_path, repos_dir))
+        preparation_started.set()
+        assert release_preparation.wait(timeout=1)
         return prepared
 
     async def review(
@@ -80,6 +84,14 @@ def test_review_accepts_missing_repository_path(
             json={"pr_url": "https://github.com/owner/repo/pull/42"},
         )
         assert response.status_code == 202
+        assert preparation_started.wait(timeout=1)
+        run_id = response.json()["run_id"]
+        detail = client.get(f"/api/runs/{run_id}")
+        assert detail.status_code == 200
+        assert detail.json()["events"][0]["workflow_node"]["detail"] == (
+            "首次使用会自动克隆，已有缓存将执行快速更新。"
+        )
+        release_preparation.set()
         assert reviewed.wait(timeout=1)
 
     assert preparation_calls == [

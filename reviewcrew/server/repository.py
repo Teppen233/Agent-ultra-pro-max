@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -10,7 +12,9 @@ GITHUB_PR = re.compile(
 )
 GITHUB_REMOTE = re.compile(r"github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?$")
 URL_CREDENTIALS = re.compile(r"(https?://)[^/@\s]+@")
-GIT_TIMEOUT_SECONDS = 120
+GIT_COMMAND_TIMEOUT_SECONDS = 30
+GIT_PULL_TIMEOUT_SECONDS = 300
+GIT_CLONE_TIMEOUT_SECONDS = 900
 
 _LOCKS_GUARD = threading.Lock()
 _REPOSITORY_LOCKS: dict[Path, threading.Lock] = {}
@@ -38,15 +42,26 @@ def _sanitize_git_output(value: str) -> str:
     return URL_CREDENTIALS.sub(r"\1***@", value.strip())
 
 
-def _run_git(arguments: list[str], action: str) -> subprocess.CompletedProcess[str]:
+def _run_git(
+    arguments: list[str],
+    action: str,
+    timeout: int = GIT_COMMAND_TIMEOUT_SECONDS,
+) -> subprocess.CompletedProcess[str]:
     command = ["git", *arguments]
+    environment = {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_HTTP_LOW_SPEED_LIMIT": "1",
+        "GIT_HTTP_LOW_SPEED_TIME": "60",
+    }
     try:
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
-            timeout=GIT_TIMEOUT_SECONDS,
+            timeout=timeout,
             check=False,
+            env=environment,
         )
     except subprocess.TimeoutExpired as error:
         raise RepositoryPreparationError(f"{action}超时，请检查网络或 Git 状态。") from error
@@ -111,7 +126,11 @@ def _update_repository(repository: Path, expected: tuple[str, str] | None) -> Pa
     _validate_worktree(repository)
     _ensure_clean(repository)
     _validate_origin(repository, expected)
-    _run_git(["-C", str(repository), "pull", "--ff-only"], "更新仓库")
+    _run_git(
+        ["-C", str(repository), "pull", "--ff-only"],
+        "更新仓库",
+        GIT_PULL_TIMEOUT_SECONDS,
+    )
     return repository
 
 
@@ -137,5 +156,14 @@ def prepare_repository(
             return _update_repository(repository, expected)
         repository.parent.mkdir(parents=True, exist_ok=True)
         clone_url = f"https://github.com/{owner}/{name}.git"
-        _run_git(["clone", clone_url, str(repository)], "克隆仓库")
+        try:
+            _run_git(
+                ["clone", clone_url, str(repository)],
+                "克隆仓库",
+                GIT_CLONE_TIMEOUT_SECONDS,
+            )
+        except RepositoryPreparationError:
+            if repository.exists():
+                shutil.rmtree(repository)
+            raise
         return repository

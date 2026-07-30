@@ -226,3 +226,26 @@ def test_git_timeout_becomes_actionable_error(
 
     with pytest.raises(RepositoryPreparationError, match="超时"):
         prepare_repository("https://github.com/owner/repo/pull/42", str(repository))
+
+
+def test_failed_clone_removes_partial_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "repos" / "owner__repo"
+
+    def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        target.mkdir(parents=True)
+        target.joinpath("partial").write_text("incomplete", encoding="utf-8")
+        return git_result(command, returncode=1, stderr="network failed")
+
+    monkeypatch.setattr("reviewcrew.server.repository.subprocess.run", run)
+
+    with pytest.raises(RepositoryPreparationError, match="克隆仓库失败"):
+        prepare_repository(
+            "https://github.com/owner/repo/pull/42",
+            None,
+            tmp_path / "repos",
+        )
+
+    assert not target.exists()

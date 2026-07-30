@@ -96,6 +96,25 @@ def create_app(
     @application.post("/api/review", status_code=202)
     async def start_review(request: ReviewRequest) -> dict[str, str]:
         run_id = uuid.uuid4().hex[:12]
+        logger = EventLogger(run_id, runs_dir)
+        automatic_checkout = not request.repo_path or not request.repo_path.strip()
+        logger.emit(
+            PipelineEvent(
+                timestamp=time.time(),
+                type="workflow_node",
+                workflow_node=WorkflowNode(
+                    id="input",
+                    kind="input",
+                    label="正在拉取远程仓库" if automatic_checkout else "正在更新本地仓库",
+                    status="running",
+                    detail=(
+                        "首次使用会自动克隆，已有缓存将执行快速更新。"
+                        if automatic_checkout
+                        else "正在执行 git pull --ff-only。"
+                    ),
+                ),
+            )
+        )
 
         async def execute() -> None:
             try:
@@ -104,6 +123,19 @@ def create_app(
                     request.pr_url,
                     request.repo_path,
                     repos_dir,
+                )
+                logger.emit(
+                    PipelineEvent(
+                        timestamp=time.time(),
+                        type="workflow_node",
+                        workflow_node=WorkflowNode(
+                            id="input",
+                            kind="input",
+                            label="仓库准备完成",
+                            status="completed",
+                            detail="已完成仓库同步，开始解析 PR Diff。",
+                        ),
+                    )
                 )
                 await Orchestrator(runs_dir=runs_dir).review(request.pr_url, repo, run_id=run_id)
             except Exception as error:
