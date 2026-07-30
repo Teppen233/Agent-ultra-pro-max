@@ -2,7 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { PipelineEvent } from '@/contracts'
-import { useReviewStore } from '@/stores/review'
+import { toOperationRecord, useReviewStore } from '@/stores/review'
 
 const event = (
   sequence: number,
@@ -19,6 +19,15 @@ const event = (
 
 describe('Review Store 事件归约', () => {
   beforeEach(() => setActivePinia(createPinia()))
+
+  it('将工具能力降级归约为已降级，而不显示为失败', () => {
+    const operation = toOperationRecord(event(1, 'tool.degraded' as PipelineEvent['type'], {
+      actor: 'github_pr_loader', actor_type: 'system', tool_name: 'git.load_diff',
+      target: 'acme/repo#7', summary: '未提供本地仓库，已降级为远程差异。', status: 'degraded',
+    }))
+
+    expect(operation?.status).toBe('degraded')
+  })
 
   it('按完整 agent id 保存六个并行专家实例', () => {
     const store = useReviewStore()

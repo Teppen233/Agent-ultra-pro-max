@@ -21,6 +21,9 @@ describe('OperationFeed 事件分类', () => {
     expect(classifyOperationEvent(event('tool.completed', {
       actor: 'context_builder', actor_type: 'system', tool_name: 'context.read_file', status: 'completed',
     }))).toBe('tool')
+    expect(classifyOperationEvent(event('tool.degraded', {
+      actor: 'github_pr_loader', actor_type: 'system', tool_name: 'git.load_diff', status: 'degraded',
+    }))).toBe('tool')
     expect(classifyOperationEvent(event('mailbox.message', {
       sender: 'verifier', recipient: 'defect:ctx-1', kind: 'evidence_request', summary: '请求补证',
     }))).toBe('mailbox')

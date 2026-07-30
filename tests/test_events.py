@@ -141,6 +141,27 @@ def test_tool_activity_completes_only_after_real_handle_completion(tmp_path) -> 
     assert events[-1].data["result_count"] == 2
 
 
+def test_tool_activity_degradation_is_not_published_as_a_tool_failure(tmp_path) -> None:
+    """无法执行的可选能力必须以降级，而非真实失败，对外发布。"""
+
+    activity_module = importlib.import_module("reviewcrew.tool_activity")
+    store = EventStore(tmp_path)
+    run_id = store.create_run()
+    publisher = activity_module.ToolActivityPublisher(store, run_id)
+
+    publisher.degraded(
+        actor="github_pr_loader",
+        actor_type="system",
+        tool_name="git.load_diff",
+        target="acme/repo#7",
+        summary="GitHub 模式未提供本地仓库，已降级为远程差异。",
+    )
+
+    event = store.read(run_id)[0]
+    assert event.type == "tool.degraded"
+    assert event.data["status"] == "degraded"
+
+
 def test_tool_event_clips_public_target_and_summary_instead_of_rejecting(tmp_path) -> None:
     """超长公开字符串应按契约裁剪，不能让事件持久化失败。"""
 

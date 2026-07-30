@@ -243,7 +243,7 @@ const eventTypes = new Set<EventType>([
   'review.started', 'review.completed', 'review.failed',
   'stage.started', 'stage.completed', 'stage.failed',
   'agent.started', 'agent.tool', 'agent.candidate', 'agent.completed', 'agent.failed',
-  'plan.published', 'tool.started', 'tool.completed', 'tool.failed', 'mailbox.message',
+  'plan.published', 'tool.started', 'tool.completed', 'tool.degraded', 'tool.failed', 'mailbox.message',
   'verifier.started', 'verifier.accepted', 'verifier.rejected', 'verifier.completed',
   'report.generated',
 ])

@@ -274,7 +274,7 @@ class ReviewPlan(BaseModel):
 
 
 ToolActorType = Literal["system", "agent"]
-ToolActivityStatus = Literal["started", "completed", "failed"]
+ToolActivityStatus = Literal["started", "completed", "degraded", "failed"]
 
 
 class ToolActivityData(BaseModel):

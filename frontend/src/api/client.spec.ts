@@ -57,7 +57,7 @@ describe('API Client', () => {
   })
 
   it('解析计划、工具与 Mailbox 新事件契约', () => {
-    const types = ['plan.published', 'tool.started', 'tool.completed', 'tool.failed', 'mailbox.message']
+    const types = ['plan.published', 'tool.started', 'tool.completed', 'tool.degraded', 'tool.failed', 'mailbox.message']
     const log = types.map((type, index) => JSON.stringify({
       ...publicEvent,
       id: `evt-contract-${index + 1}`,

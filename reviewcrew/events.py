@@ -35,6 +35,7 @@ EventType = Literal[
     "plan.published",
     "tool.started",
     "tool.completed",
+    "tool.degraded",
     "tool.failed",
     "mailbox.message",
     "verifier.started",

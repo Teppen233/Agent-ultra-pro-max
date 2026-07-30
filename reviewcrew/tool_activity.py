@@ -75,7 +75,7 @@ class ToolActivityPublisher:
         )
         self.store.emit(
             self.run_id,
-            "tool.failed",
+            "tool.degraded",
             activity.data(summary=_clip(summary, _SUMMARY_LIMIT), duration_ms=0),
         )
 

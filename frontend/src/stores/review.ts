@@ -108,12 +108,12 @@ export const toOperationRecord = (event: PipelineEvent): OperationRecord | undef
   }
   if (category === 'tool') {
     const toolName = asString(data.tool_name) ?? 'unknown.tool'
-    const status = event.type === 'tool.started' ? 'started' : event.type === 'tool.failed' ? 'failed' : 'completed'
+    const status = event.type === 'tool.started' ? 'started' : event.type === 'tool.degraded' ? 'degraded' : event.type === 'tool.failed' ? 'failed' : 'completed'
     return {
       id: event.id, category, eventType: event.type, timestamp: event.timestamp,
       actor: asString(data.actor) ?? '系统', actorType: asString(data.actor_type) as 'system' | 'agent' | undefined,
       action: toolActions[toolName] ?? `执行 ${toolName}`, target: asString(data.target) ?? '', status,
-      summary: asString(data.summary) ?? (status === 'started' ? '操作已开始。' : status === 'failed' ? '操作未完成。' : '操作已完成。'),
+      summary: asString(data.summary) ?? (status === 'started' ? '操作已开始。' : status === 'degraded' ? '能力已降级。' : status === 'failed' ? '操作未完成。' : '操作已完成。'),
       durationMs: asNumber(data.duration_ms), resultCount: asNumber(data.result_count),
       contextId: asString(data.context_id), agentId: asString(data.agent_id),
     }
@@ -263,6 +263,7 @@ export const useReviewStore = defineStore('review', {
           break
         case 'tool.started':
         case 'tool.completed':
+        case 'tool.degraded':
         case 'tool.failed': {
           const agentId = asString(data.agent_id)
           const role = resolveRole(data, agentId?.startsWith('intent') ? 'intent' : agentId?.startsWith('verifier') ? 'verifier' : agentId ? 'defect' : undefined)

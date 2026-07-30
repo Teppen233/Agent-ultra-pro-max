@@ -7,7 +7,7 @@ const categoryText: Record<OperationCategory, string> = {
   plan: '计划', tool: '工具', mailbox: '协作', candidate: '候选', verdict: '裁决',
 }
 const statusText: Record<OperationRecord['status'], string> = {
-  started: '进行中', completed: '已完成', failed: '失败', published: '已发布',
+  started: '进行中', completed: '已完成', degraded: '已降级', failed: '失败', published: '已发布',
   pending: '待验证', accepted: '已接受', rejected: '已拒绝',
 }
 </script>

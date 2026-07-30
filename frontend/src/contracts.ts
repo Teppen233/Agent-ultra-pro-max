@@ -14,6 +14,7 @@ export type EventType =
   | 'plan.published'
   | 'tool.started'
   | 'tool.completed'
+  | 'tool.degraded'
   | 'tool.failed'
   | 'mailbox.message'
   | 'verifier.started'
@@ -114,7 +115,7 @@ export interface OperationRecord {
   actorType?: 'system' | 'agent'
   action: string
   target: string
-  status: 'started' | 'completed' | 'failed' | 'published' | 'pending' | 'accepted' | 'rejected'
+  status: 'started' | 'completed' | 'degraded' | 'failed' | 'published' | 'pending' | 'accepted' | 'rejected'
   summary: string
   durationMs?: number
   resultCount?: number

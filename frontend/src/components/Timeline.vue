@@ -1,8 +1,7 @@
-<script setup lang="ts">
-import { computed, ref } from 'vue'
+<script lang="ts">
 import type { PipelineEvent } from '@/contracts'
 
-const props = defineProps<{ events: PipelineEvent[] }>()
+export const labelEventType = (type: PipelineEvent['type']): string => labels[type]
 
 const labels: Record<PipelineEvent['type'], string> = {
   'review.started': '审查启动', 'review.completed': '审查完成', 'review.failed': '审查失败',
@@ -10,10 +9,16 @@ const labels: Record<PipelineEvent['type'], string> = {
   'agent.started': 'Agent 启动', 'agent.tool': '工具调用', 'agent.candidate': '发现候选',
   'agent.completed': 'Agent 完成', 'agent.failed': 'Agent 失败', 'verifier.started': 'Verifier 启动',
   'plan.published': '计划已发布', 'tool.started': '工具开始', 'tool.completed': '工具完成',
-  'tool.failed': '工具失败', 'mailbox.message': '协作消息',
+  'tool.degraded': '已降级', 'tool.failed': '工具失败', 'mailbox.message': '协作消息',
   'verifier.accepted': '候选通过', 'verifier.rejected': '候选拒绝', 'verifier.completed': '验证完成',
   'report.generated': '报告已生成',
 }
+</script>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+
+const props = defineProps<{ events: PipelineEvent[] }>()
 
 // 严格白名单摘要：不读取 prompt、reasoning 或模型响应字段。
 const selectedType = ref<'all' | PipelineEvent['type']>('all')
