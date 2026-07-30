@@ -103,10 +103,10 @@ class Orchestrator:
                     defect_agent = DefectAgent(None, agent_id="defect-1")
                     intent_agent = IntentAgent(None, agent_id="intent-1")
 
-                    defect_findings, intent_findings = await asyncio.gather(
-                        defect_agent.run(contexts=packs, pr_data=pr_data),
-                        intent_agent.run(contexts=packs, pr_data=pr_data),
-                    )
+                    # 串行调用（避免 API 并发限制），最多审查 5 个文件
+                    packs_to_review = packs[:5] if packs else []
+                    defect_findings = await defect_agent.run(contexts=packs_to_review, pr_data=pr_data)
+                    intent_findings = await intent_agent.run(contexts=packs_to_review, pr_data=pr_data)
                     all_findings.extend(defect_findings)
                     all_findings.extend(intent_findings)
 
