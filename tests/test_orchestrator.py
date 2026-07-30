@@ -131,6 +131,10 @@ async def test_orchestrator_emits_dynamic_workflow(tmp_path: Path) -> None:
         "result",
     }
     assert len(result.findings) == 1
+    report_event = next(event for event in events if event["type"] == "report")
+    assert report_event["findings"] == [
+        finding.model_dump(exclude_none=True) for finding in result.findings
+    ]
     assert (events_path.parent / "report.md").exists()
 
 

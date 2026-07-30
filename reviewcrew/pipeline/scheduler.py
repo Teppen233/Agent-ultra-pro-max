@@ -501,9 +501,12 @@ class MissionScheduler:
         finally:
             unsubscribe()
 
-        candidates = dedupe([finding for _, finding in records])
         verified_batches = await asyncio.gather(*verifier_jobs.values())
         verdicts = [verdict for _, batch in verified_batches for verdict in batch]
+        reviewed_candidates = filter_and_rank(
+            [finding for _, finding in records], verdicts
+        )
+        candidates = dedupe(reviewed_candidates)
         by_id = {verdict.finding_id: verdict for verdict in verdicts}
         for finding in candidates:
             verdict = by_id.get(finding.id)
@@ -524,7 +527,7 @@ class MissionScheduler:
                 "result",
             )
         return SchedulerSummary(
-            findings=filter_and_rank(candidates, verdicts),
+            findings=candidates,
             verdicts=verdicts,
             tasks=list(tasks.values()),
             max_concurrency=self._max_active,

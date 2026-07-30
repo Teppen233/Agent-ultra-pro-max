@@ -105,7 +105,7 @@ export type PipelineEvent =
     })
   | (EventBase & { type: 'finding'; finding: Finding })
   | (EventBase & { type: 'verdict'; verdict: Verdict })
-  | (EventBase & { type: 'report'; markdown: string })
+  | (EventBase & { type: 'report'; markdown: string; findings?: Finding[] })
 
 export interface DispatchEntry {
   id: string

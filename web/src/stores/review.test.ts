@@ -160,4 +160,27 @@ describe('review workflow reducer', () => {
       'second verdict',
     )
   })
+
+  it('replaces streamed candidates with the authoritative report findings', () => {
+    const store = useReviewStore()
+    const findingEvents = demoEvents.filter((event) => event.type === 'finding')
+    for (const event of findingEvents) store.consume(structuredClone(event))
+    const finalFinding = structuredClone(
+      findingEvents[0]?.finding,
+    )
+    if (!finalFinding) throw new Error('fixture mismatch')
+    finalFinding.verdict = 'keep'
+    finalFinding.confidence_adjusted = 0.9
+
+    store.consume({
+      type: 'report',
+      timestamp: 10,
+      markdown: '# 审查摘要\n\n- 候选总数：1',
+      findings: [finalFinding],
+    })
+
+    expect(store.findings).toEqual([finalFinding])
+    expect(store.retainedFindings).toHaveLength(1)
+    expect(store.rejectedCount).toBe(0)
+  })
 })

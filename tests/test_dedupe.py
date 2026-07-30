@@ -36,10 +36,37 @@ def test_dedupe_injected_semantic_similarity() -> None:
 
 def test_different_categories_do_not_merge() -> None:
     result = dedupe(
-        [finding("a.py", 10, 0.7), finding("b.py", 30, 0.8, "memory")],
+        [finding("a.py", 10, 0.7), finding("a.py", 12, 0.8, "memory")],
         similarity=lambda left, right: 1.0,
     )
     assert len(result) == 2
+
+
+def test_nearby_findings_with_different_evidence_do_not_merge() -> None:
+    left = finding("a.py", 10, 0.7)
+    right = finding("a.py", 12, 0.8).model_copy(
+        update={
+            "title": "Cache entry is never invalidated",
+            "reasoning": "The update path leaves stale state behind",
+            "trigger_path": "request to cache update",
+        }
+    )
+
+    assert len(dedupe([left, right])) == 2
+
+
+def test_dedupe_prefers_verifier_adjusted_confidence() -> None:
+    rejected = finding("a.py", 10, 0.95).model_copy(
+        update={"verdict": "reject", "confidence_adjusted": 0.1}
+    )
+    confirmed = finding("a.py", 12, 0.7).model_copy(
+        update={"verdict": "keep", "confidence_adjusted": 0.9}
+    )
+
+    result = dedupe([rejected, confirmed])
+
+    assert len(result) == 1
+    assert result[0].verdict == "keep"
 
 
 def test_model_placeholder_ids_are_replaced_with_content_ids() -> None:

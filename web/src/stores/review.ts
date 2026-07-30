@@ -251,6 +251,7 @@ export const useReviewStore = defineStore('review', {
           finding.confidence_adjusted = event.verdict.confidence_adjusted
         }
       } else if (event.type === 'report') {
+        if (event.findings) this.findings = event.findings.map((finding) => ({ ...finding }))
         this.report = event.markdown
       } else if (event.type === 'stage' && event.status === 'error') {
         this.error = event.text || '审查任务执行失败'

@@ -29,11 +29,28 @@ def lexical_similarity(left: Finding, right: Finding) -> float:
     return len(left_words & right_words) / len(union) if union else 0.0
 
 
+def _title_similarity(left: Finding, right: Finding) -> float:
+    left_words = _words(left.title)
+    right_words = _words(right.title)
+    union = left_words | right_words
+    if union:
+        return len(left_words & right_words) / len(union)
+    return 1.0 if left.title.strip() == right.title.strip() else 0.0
+
+
 def _line_duplicate(left: Finding, right: Finding) -> bool:
     return (
         left.file == right.file
         and left.line_start <= right.line_end + 3
         and left.line_end >= right.line_start - 3
+    )
+
+
+def _confidence(finding: Finding) -> float:
+    return (
+        finding.confidence_adjusted
+        if finding.confidence_adjusted is not None
+        else finding.confidence
     )
 
 
@@ -49,7 +66,14 @@ def dedupe(
             (
                 position
                 for position, existing in enumerate(kept)
-                if _line_duplicate(existing, finding)
+                if (
+                    existing.category == finding.category
+                    and _line_duplicate(existing, finding)
+                    and (
+                        _title_similarity(existing, finding) >= 0.5
+                        or similarity(existing, finding) >= 0.5
+                    )
+                )
                 or (
                     existing.category == finding.category
                     and similarity(existing, finding) >= semantic_threshold
@@ -59,6 +83,6 @@ def dedupe(
         )
         if duplicate_index is None:
             kept.append(finding)
-        elif finding.confidence > kept[duplicate_index].confidence:
+        elif _confidence(finding) > _confidence(kept[duplicate_index]):
             kept[duplicate_index] = finding
     return kept

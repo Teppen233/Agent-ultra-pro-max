@@ -323,7 +323,14 @@ class Orchestrator:
             logger.run_dir.joinpath("github_comments.json").write_text(
                 json.dumps(comments, indent=2), encoding="utf-8"
             )
-            logger.emit(PipelineEvent(timestamp=time.time(), type="report", markdown=markdown))
+            logger.emit(
+                PipelineEvent(
+                    timestamp=time.time(),
+                    type="report",
+                    markdown=markdown,
+                    findings=reviewed,
+                )
+            )
             logger.emit(
                 PipelineEvent(
                     timestamp=time.time(),

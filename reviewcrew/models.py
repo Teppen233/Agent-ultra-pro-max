@@ -141,5 +141,6 @@ class PipelineEvent(BaseModel):
     finding: Finding | None = None
     verdict: Verdict | None = None
     markdown: str | None = None
+    findings: list[Finding] | None = None
     workflow_node: WorkflowNode | None = None
     workflow_edge: WorkflowEdge | None = None
