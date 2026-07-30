@@ -119,7 +119,13 @@ class ExpertAgent:
                 kind="agent_completed",
                 recipient="*",
                 key="completed",
-                payload={"agent_id": agent_id, "role": self.role, "context_id": context.id},
+                payload={
+                    "agent_id": agent_id,
+                    "role": self.role,
+                    "context_id": context.id,
+                    "completed_checks": snapshot.completed_checks,
+                    "pending_checks": snapshot.pending_checks,
+                },
             )
             return snapshot
         except asyncio.CancelledError:
@@ -133,7 +139,23 @@ class ExpertAgent:
                     payload={"snapshot": latest_snapshot.model_dump(mode="json")},
                 )
             )
-            await asyncio.shield(self._publish(context, publisher, kind="agent_failed", recipient="*", key="failed", payload={"agent_id": agent_id, "role": self.role, "context_id": context.id, "warning": "专家已取消。"}))
+            await asyncio.shield(
+                self._publish(
+                    context,
+                    publisher,
+                    kind="agent_failed",
+                    recipient="*",
+                    key="failed",
+                    payload={
+                        "agent_id": agent_id,
+                        "role": self.role,
+                        "context_id": context.id,
+                        "completed_checks": latest_snapshot.completed_checks,
+                        "pending_checks": latest_snapshot.pending_checks,
+                        "warning": "专家已取消。",
+                    },
+                )
+            )
             raise
         except Exception:
             await self._publish(
@@ -146,6 +168,8 @@ class ExpertAgent:
                     "agent_id": agent_id,
                     "role": self.role,
                     "context_id": context.id,
+                    "completed_checks": latest_snapshot.completed_checks,
+                    "pending_checks": latest_snapshot.pending_checks,
                     "warning": "专家执行未完成。",
                 },
             )

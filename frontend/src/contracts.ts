@@ -101,6 +101,9 @@ export interface AgentInstanceState {
   toolCount: number
   mailboxCount: number
   candidateCount: number
+  completedChecks: string[]
+  pendingChecks: string[]
+  lastAction: string
   warning?: string
 }
 

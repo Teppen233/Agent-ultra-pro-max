@@ -29,6 +29,15 @@ describe('Review Store 事件归约', () => {
     expect(operation?.status).toBe('degraded')
   })
 
+  it('兼容旧回放中被错误记录为失败的降级工具', () => {
+    const operation = toOperationRecord(event(1, 'tool.failed', {
+      actor: 'context_builder', actor_type: 'system', tool_name: 'context.read_file',
+      target: 'acme/repo', summary: 'GitHub 模式未配置本地仓库，文件范围读取已降级。', status: 'failed',
+    }))
+
+    expect(operation?.status).toBe('degraded')
+  })
+
   it('按完整 agent id 保存六个并行专家实例', () => {
     const store = useReviewStore()
     const ids = [
@@ -45,6 +54,27 @@ describe('Review Store 事件归约', () => {
 
     expect(Object.keys((store as unknown as { agentInstances: object }).agentInstances ?? {}))
       .toEqual(ids)
+  })
+
+  it('把专家检查进度与生命周期消息归约为可读动作，而不冒充协作', () => {
+    const store = useReviewStore()
+
+    store.applyEvent(event(1, 'agent.started', {
+      agent: 'defect:ctx-1', role: 'defect', context_id: 'ctx-1', files: ['src/auth.ts'],
+    }))
+    store.applyEvent(event(2, 'mailbox.message', {
+      sender: 'defect:ctx-1', recipient: '*', kind: 'agent_review_completed',
+      activity_class: 'lifecycle', summary: '专家 defect:ctx-1 已完成上下文 ctx-1 的审查',
+    }))
+    store.applyEvent(event(3, 'agent.completed', {
+      agent: 'defect:ctx-1', role: 'defect', context_id: 'ctx-1',
+      completed_checks: ['静态破坏', '安全输入', '资源生命周期'], pending_checks: [],
+    }))
+
+    const instance = store.agentInstances['defect:ctx-1']
+    expect(instance?.completedChecks).toEqual(['静态破坏', '安全输入', '资源生命周期'])
+    expect(instance?.mailboxCount).toBe(0)
+    expect(instance?.lastAction).toBe('已完成上下文审查，未形成可验证候选')
   })
 
   it('将启动、候选、拒绝和终态归约为可展示状态', () => {

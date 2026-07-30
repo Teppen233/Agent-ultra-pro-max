@@ -181,6 +181,7 @@ onBeforeUnmount(() => {
           :candidate-count="store.candidates.length"
           :verdict-count="accepted.length + rejected.length"
           :verifier-status="store.agents.verifier.status"
+          :operations="store.operations"
         />
         <OperationFeed :operations="store.operations" />
         <section class="verdict-board panel">

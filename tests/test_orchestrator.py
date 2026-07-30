@@ -14,7 +14,7 @@ import pytest
 from reviewcrew.config import Config
 from reviewcrew.budget import ReviewBudget
 from reviewcrew.events import EventStore
-from reviewcrew.pipeline.orchestrator import Orchestrator
+from reviewcrew.pipeline.orchestrator import Orchestrator, _EventingPublisher
 from reviewcrew.report import persist_report
 from reviewcrew.schemas import (
     AgentSnapshot,
@@ -31,6 +31,8 @@ from reviewcrew.schemas import (
     Verdict,
 )
 from reviewcrew.team.publisher import MessagePublisher
+from reviewcrew.team.blackboard import EvidenceBlackboard
+from reviewcrew.team.mailbox import Mailbox
 from reviewcrew.tool_activity import ToolActivityPublisher
 
 
@@ -362,8 +364,21 @@ async def test_review_streams_first_candidate_before_experts_finish_and_persists
         "sender": "defect:ctx-auth",
         "recipient": "verifier",
         "kind": "candidate_finding",
+        "activity_class": "collaboration",
         "correlation_id": "finding-defect",
         "summary": "发布 high 候选 src/auth.py:10",
+    }
+    candidate_event = next(item for item in events if item["type"] == "agent.candidate")
+    assert candidate_event["data"] == {
+        "agent": "defect:ctx-auth",
+        "context_id": "ctx-auth",
+        "finding_id": "finding-defect",
+        "file": "src/auth.py",
+        "line": 10,
+        "severity": "high",
+        "title": "缺少资源归属校验",
+        "category": "security",
+        "confidence": 0.92,
     }
     report_activities = [
         item["type"]
@@ -388,6 +403,51 @@ async def test_review_streams_first_candidate_before_experts_finish_and_persists
     )
     for forbidden in ("reasoning_summary", "Prompt", "响应", "思维链"):
         assert forbidden not in run_text
+
+
+@pytest.mark.asyncio
+async def test_eventing_publisher_exposes_lifecycle_and_safe_terminal_progress(tmp_path: Path) -> None:
+    """公开事件区分生命周期消息，并保留有界的专家检查进度。"""
+
+    store = EventStore(tmp_path / "runs")
+    run_id = store.create_run()
+    store.claim_run(run_id)
+    publisher = _EventingPublisher(
+        mailbox=Mailbox(tmp_path / "runs", run_id),
+        blackboard=EvidenceBlackboard(run_id),
+        events=store,
+    )
+    await publisher.publish(
+        sender="defect:ctx-auth",
+        recipient="*",
+        kind="agent_review_completed",
+        key="review-completed",
+        payload={"agent_id": "defect:ctx-auth", "role": "defect", "context_id": "ctx-auth"},
+    )
+    await publisher.publish(
+        sender="defect:ctx-auth",
+        recipient="*",
+        kind="agent_completed",
+        key="completed",
+        payload={
+            "agent_id": "defect:ctx-auth",
+            "role": "defect",
+            "context_id": "ctx-auth",
+            "completed_checks": ["安全输入"],
+            "pending_checks": ["并发检查"],
+        },
+    )
+
+    mailbox_event, terminal_event = store.read(run_id)
+    assert mailbox_event.data["activity_class"] == "lifecycle"
+    assert terminal_event.data == {
+        "agent": "defect:ctx-auth",
+        "role": "defect",
+        "context_id": "ctx-auth",
+        "completed_checks": ["安全输入"],
+        "pending_checks": ["并发检查"],
+        "warning": None,
+    }
 
 
 @pytest.mark.asyncio

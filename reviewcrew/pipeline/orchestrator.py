@@ -183,6 +183,9 @@ class _EventingPublisher(MessagePublisher):
                     "sender": sender,
                     "recipient": recipient,
                     "kind": public_kind,
+                    "activity_class": (
+                        "lifecycle" if kind == "agent_review_completed" else "collaboration"
+                    ),
                     "correlation_id": correlation_id,
                     "summary": self._mailbox_summary(kind, payload),
                 },
@@ -194,10 +197,14 @@ class _EventingPublisher(MessagePublisher):
                 "agent.candidate",
                 sanitize_persisted_value({
                     "agent": sender,
+                    "context_id": payload.get("context_id"),
                     "finding_id": finding.get("id"),
                     "file": finding.get("file"),
                     "line": finding.get("line_start"),
                     "severity": finding.get("severity"),
+                    "title": str(finding.get("title") or "")[:200],
+                    "category": finding.get("category"),
+                    "confidence": finding.get("confidence"),
                 }),
             )
         elif kind in {"agent_completed", "agent_failed"}:
@@ -208,6 +215,15 @@ class _EventingPublisher(MessagePublisher):
                 sanitize_persisted_value({
                     "agent": payload.get("agent_id", sender),
                     "role": payload.get("role"),
+                    "context_id": payload.get("context_id"),
+                    "completed_checks": [
+                        str(item)[:160]
+                        for item in payload.get("completed_checks", [])[:64]
+                    ],
+                    "pending_checks": [
+                        str(item)[:160]
+                        for item in payload.get("pending_checks", [])[:64]
+                    ],
                     "warning": payload.get("warning"),
                 }),
             )

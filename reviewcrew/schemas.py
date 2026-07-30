@@ -317,6 +317,7 @@ class MailboxEventData(BaseModel):
     sender: str = Field(max_length=160)
     recipient: str = Field(max_length=160)
     kind: PublicMailboxKind
+    activity_class: Literal["collaboration", "lifecycle"]
     correlation_id: str | None = Field(default=None, max_length=160)
     summary: str = Field(max_length=500)
 

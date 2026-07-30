@@ -199,6 +199,31 @@ async def test_defect_agent_publishes_sql_injection_candidate_from_fake_model(tm
 
 
 @pytest.mark.asyncio
+async def test_expert_terminal_message_exposes_safe_check_progress(tmp_path) -> None:
+    """专家终态必须携带可公开的检查进度，避免前端只剩三个裸计数。"""
+
+    from reviewcrew.agents.defect import DefectAgent
+
+    mailbox = Mailbox(tmp_path, "run-check-progress")
+    blackboard = EvidenceBlackboard("run-check-progress")
+
+    await DefectAgent(
+        model=make_model(category="security", line=10, title="SQL 拼接可注入"),
+        collaboration_window_seconds=0.01,
+    ).run(make_context(), mailbox=mailbox, blackboard=blackboard, budget=Budget(seconds=60))
+
+    terminal = blackboard.by_kind("agent_completed")[0]
+    assert terminal.payload["context_id"] == "ctx-sql"
+    assert terminal.payload["completed_checks"] == [
+        "静态破坏",
+        "安全输入",
+        "内存与资源生命周期",
+        "合同测试",
+    ]
+    assert terminal.payload["pending_checks"] == []
+
+
+@pytest.mark.asyncio
 async def test_expert_publishes_bounded_typed_context_for_verifier(tmp_path) -> None:
     """专家候选携带去重且有上限的类型化上下文，供 Verifier 判断可达性。"""
 

@@ -108,12 +108,15 @@ export const toOperationRecord = (event: PipelineEvent): OperationRecord | undef
   }
   if (category === 'tool') {
     const toolName = asString(data.tool_name) ?? 'unknown.tool'
-    const status = event.type === 'tool.started' ? 'started' : event.type === 'tool.degraded' ? 'degraded' : event.type === 'tool.failed' ? 'failed' : 'completed'
+    const summary = asString(data.summary)
+    // 兼容旧版本把“能力已降级”错误发布为 tool.failed 的历史回放。
+    const legacyDegraded = event.type === 'tool.failed' && summary?.includes('已降级')
+    const status = event.type === 'tool.started' ? 'started' : event.type === 'tool.degraded' || legacyDegraded ? 'degraded' : event.type === 'tool.failed' ? 'failed' : 'completed'
     return {
       id: event.id, category, eventType: event.type, timestamp: event.timestamp,
       actor: asString(data.actor) ?? '系统', actorType: asString(data.actor_type) as 'system' | 'agent' | undefined,
       action: toolActions[toolName] ?? `执行 ${toolName}`, target: asString(data.target) ?? '', status,
-      summary: asString(data.summary) ?? (status === 'started' ? '操作已开始。' : status === 'degraded' ? '能力已降级。' : status === 'failed' ? '操作未完成。' : '操作已完成。'),
+      summary: summary ?? (status === 'started' ? '操作已开始。' : status === 'degraded' ? '能力已降级。' : status === 'failed' ? '操作未完成。' : '操作已完成。'),
       durationMs: asNumber(data.duration_ms), resultCount: asNumber(data.result_count),
       contextId: asString(data.context_id), agentId: asString(data.agent_id),
     }
@@ -223,7 +226,11 @@ export const useReviewStore = defineStore('review', {
           const role = resolveRole(data)
           if (role) this.agents[role].status = 'running'
           const agentId = asString(data.agent) ?? role
-          if (agentId && role) this.ensureAgentInstance(agentId, role, data, event.timestamp).status = 'running'
+          if (agentId && role) {
+            const instance = this.ensureAgentInstance(agentId, role, data, event.timestamp)
+            instance.status = 'running'
+            instance.lastAction = '正在分析上下文包'
+          }
           break
         }
         case 'agent.tool': {
@@ -239,7 +246,11 @@ export const useReviewStore = defineStore('review', {
           if (!this.candidates.some((item) => item.finding.id === finding.id)) {
             this.candidates.push({ finding, agent: role, verdict: 'pending' })
             this.agents[role].candidateCount += 1
-            if (agentId) this.ensureAgentInstance(agentId, role, data, event.timestamp).candidateCount += 1
+            if (agentId) {
+              const instance = this.ensureAgentInstance(agentId, role, data, event.timestamp)
+              instance.candidateCount += 1
+              instance.lastAction = `已提交 ${instance.candidateCount} 个候选，等待 Verifier`
+            }
           }
           break
         }
@@ -254,6 +265,13 @@ export const useReviewStore = defineStore('review', {
             instance.status = event.type === 'agent.completed' ? 'completed' : 'failed'
             instance.completedAt = event.timestamp
             instance.warning = asString(data.warning)
+            if (Array.isArray(data.completed_checks)) instance.completedChecks = asStringArray(data.completed_checks)
+            if (Array.isArray(data.pending_checks)) instance.pendingChecks = asStringArray(data.pending_checks)
+            instance.lastAction = event.type === 'agent.failed'
+              ? (instance.warning ?? '执行未完成，等待汇总')
+              : instance.candidateCount > 0
+                ? `已完成上下文审查，提交 ${instance.candidateCount} 个候选等待验证`
+                : '已完成上下文审查，未形成可验证候选'
           }
           break
         }
@@ -273,15 +291,28 @@ export const useReviewStore = defineStore('review', {
             if (event.type === 'tool.started') {
               instance.toolCount += 1
               if (tool && !instance.tools.includes(tool)) instance.tools.push(tool)
+              instance.lastAction = `正在${toolActions[tool ?? ''] ?? `执行 ${tool ?? '工具'}`}`
             }
           }
           break
         }
         case 'mailbox.message': {
+          const kind = asString(data.kind)
+          if (kind === 'agent_review_completed') {
+            const sender = asString(data.sender)
+            if (sender && this.agentInstances[sender]) {
+              this.agentInstances[sender].lastAction = '已完成初审，等待协作窗口收敛'
+            }
+            break
+          }
+          if (kind !== 'evidence_request' && kind !== 'evidence_response') break
           const participants = new Set([asString(data.sender), asString(data.recipient)])
           for (const agentId of participants) {
             if (!agentId || agentId === '*' || !this.agentInstances[agentId]) continue
             this.agentInstances[agentId].mailboxCount += 1
+            this.agentInstances[agentId].lastAction = kind === 'evidence_request'
+              ? '正在处理补充证据请求'
+              : '已返回补充证据结果'
           }
           break
         }
@@ -323,6 +354,8 @@ export const useReviewStore = defineStore('review', {
       if (existing) {
         const files = asStringArray(data.files)
         if (files.length) existing.files = files
+        if (Array.isArray(data.completed_checks)) existing.completedChecks = asStringArray(data.completed_checks)
+        if (Array.isArray(data.pending_checks)) existing.pendingChecks = asStringArray(data.pending_checks)
         return existing
       }
       const contextId = asString(data.context_id) ?? (agentId.split(':').slice(1).join(':') || 'global')
@@ -338,6 +371,9 @@ export const useReviewStore = defineStore('review', {
         toolCount: 0,
         mailboxCount: 0,
         candidateCount: 0,
+        completedChecks: asStringArray(data.completed_checks),
+        pendingChecks: asStringArray(data.pending_checks),
+        lastAction: '等待开始分析上下文',
       }
       this.agentInstances[agentId] = instance
       return instance

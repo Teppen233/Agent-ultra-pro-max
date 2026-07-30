@@ -41,6 +41,7 @@ FRONTEND_EVENT_TYPES = {
     "plan.published",
     "tool.started",
     "tool.completed",
+    "tool.degraded",
     "tool.failed",
     "mailbox.message",
     "verifier.started",
@@ -289,6 +290,7 @@ def test_post_fake_orchestrator_sse_result_report_and_replay_match_frontend_cont
     } <= tool_names
     mailbox = next(event for event in live_events if event["type"] == "mailbox.message")
     assert mailbox["data"]["kind"] == "candidate_finding"
+    assert mailbox["data"]["activity_class"] == "collaboration"
     assert "tool_name" not in mailbox["data"]
     serialized_events = json.dumps(live_events, ensure_ascii=False).casefold()
     for forbidden in ("prompt", "reasoning", "api_key", "raw_response"):
@@ -296,11 +298,16 @@ def test_post_fake_orchestrator_sse_result_report_and_replay_match_frontend_cont
     candidate = next(event for event in live_events if event["type"] == "agent.candidate")
     assert str(candidate["data"]["agent"]).startswith("defect:ctx-")
     assert {key: value for key, value in candidate["data"].items() if key != "agent"} == {
+        "context_id": candidate["data"]["context_id"],
         "finding_id": "finding-full-stack",
         "file": "access.py",
         "line": 2,
         "severity": "high",
+        "title": "缺少资源所有权校验",
+        "category": "security",
+        "confidence": 0.94,
     }
+    assert str(candidate["data"]["context_id"]).startswith("ctx-")
     accepted = next(event for event in live_events if event["type"] == "verifier.accepted")
     assert accepted["data"] == {
         "finding_id": "finding-full-stack",
