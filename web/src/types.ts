@@ -129,6 +129,23 @@ export interface RunDetail {
   diff: string | null
 }
 
+export interface BenchmarkEntrySummary {
+  run_id: string
+  repository: string
+  repository_name: string
+  pr_url: string
+  pr_number: number
+  status: 'reserved' | 'running' | 'ready'
+  created_at: number
+  completed_at: number | null
+}
+
+export interface BenchmarkCollection {
+  capacity: number
+  count: number
+  entries: BenchmarkEntrySummary[]
+}
+
 export interface BenchmarkRow {
   repo: string
   pr_url: string

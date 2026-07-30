@@ -13,7 +13,7 @@ describe('ReviewForm', () => {
     await wrapper.get('form').trigger('submit')
 
     expect(wrapper.emitted('submit')).toEqual([
-      ['https://github.com/owner/repo/pull/42', ''],
+      ['https://github.com/owner/repo/pull/42', '', false],
     ])
   })
 
@@ -29,7 +29,21 @@ describe('ReviewForm', () => {
     await wrapper.get('form').trigger('submit')
 
     expect(wrapper.emitted('submit')).toEqual([
-      ['/tmp/change.diff', '/workspace/repo'],
+      ['/tmp/change.diff', '/workspace/repo', false],
+    ])
+  })
+
+  it('allows a GitHub PR to be added while capacity remains', async () => {
+    const wrapper = mount(ReviewForm, {
+      props: { loading: false, benchmarkCount: 2, benchmarkCapacity: 5 },
+    })
+    await wrapper
+      .get('[aria-label="GitHub PR URL 或本地 Diff 路径"] input')
+      .setValue('https://github.com/owner/repo/pull/42')
+    await wrapper.get('.benchmark-option [role="checkbox"]').trigger('click')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toEqual([
+      ['https://github.com/owner/repo/pull/42', '', true],
     ])
   })
 })

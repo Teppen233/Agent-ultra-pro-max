@@ -7,6 +7,7 @@ import type {
   PipelineEvent,
   RunDetail,
   RunSummary,
+  BenchmarkCollection,
   WorkflowEdge,
   WorkflowNode,
   WorkflowStatus,
@@ -33,6 +34,8 @@ interface ReviewState {
   replayIndex: number
   replaySpeed: ReplaySpeed
   replayTimer: number | null
+  benchmarkCapacity: number
+  benchmarkCount: number
 }
 
 export type ReplaySpeed = 0.5 | 1 | 2 | 4
@@ -84,6 +87,8 @@ export const useReviewStore = defineStore('review', {
     replayIndex: 0,
     replaySpeed: 1,
     replayTimer: null,
+    benchmarkCapacity: 5,
+    benchmarkCount: 0,
   }),
   getters: {
     retainedFindings: (state) =>
@@ -335,18 +340,23 @@ export const useReviewStore = defineStore('review', {
       this.rebuildReplay(0)
       this.playReplay()
     },
-    async startReview(prUrl: string, repoPath?: string) {
+    async startReview(prUrl: string, repoPath?: string, addToBenchmark = false) {
       this.reset()
       this.loading = true
       try {
         const response = await fetch('/api/review', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pr_url: prUrl, repo_path: repoPath?.trim() || null }),
+          body: JSON.stringify({
+            pr_url: prUrl,
+            repo_path: repoPath?.trim() || null,
+            add_to_benchmark: addToBenchmark,
+          }),
         })
         if (!response.ok) throw new Error(await responseError(response, '审查任务启动失败'))
         const payload = (await response.json()) as { run_id: string }
         this.runId = payload.run_id
+        if (addToBenchmark) this.benchmarkCount += 1
         this.connectLive(payload.run_id)
         return payload.run_id
       } catch (error: unknown) {
@@ -433,6 +443,13 @@ export const useReviewStore = defineStore('review', {
     async loadRuns() {
       const response = await fetch('/api/runs')
       if (response.ok) this.runs = (await response.json()) as RunSummary[]
+    },
+    async loadBenchmarkCapacity() {
+      const response = await fetch('/api/benchmark/entries')
+      if (!response.ok) return
+      const payload = (await response.json()) as BenchmarkCollection
+      this.benchmarkCapacity = payload.capacity
+      this.benchmarkCount = payload.count
     },
     loadDemo() {
       this.setReplaySource(demoEvents, true)

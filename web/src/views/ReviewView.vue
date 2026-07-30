@@ -43,9 +43,9 @@ watch(
   },
 )
 
-async function start(prUrl: string, repoPath: string) {
+async function start(prUrl: string, repoPath: string, addToBenchmark: boolean) {
   try {
-    const runId = await store.startReview(prUrl, repoPath)
+    const runId = await store.startReview(prUrl, repoPath, addToBenchmark)
     await router.replace(`/review/${runId}`)
   } catch {
     // The store exposes the actionable message through the toast watcher.
@@ -64,6 +64,7 @@ function toggleReplay() {
 
 onMounted(() => {
   void store.loadRuns()
+  void store.loadBenchmarkCapacity()
 })
 
 watch(
@@ -108,7 +109,13 @@ watch(
         <span><ShieldCheck :size="14" /> REVIEW WORKSPACE</span>
         <strong>代码审查</strong>
       </div>
-      <ReviewForm :loading="store.loading" @submit="start" @demo="demo" />
+      <ReviewForm
+        :loading="store.loading"
+        :benchmark-count="store.benchmarkCount"
+        :benchmark-capacity="store.benchmarkCapacity"
+        @submit="start"
+        @demo="demo"
+      />
       <div class="run-state" :class="{ active: store.runId }">
         <span>{{ store.live ? 'LIVE' : store.runId ? 'REPLAY' : 'READY' }}</span>
         <b class="mono">{{ store.runId ?? 'NO RUN' }}</b>

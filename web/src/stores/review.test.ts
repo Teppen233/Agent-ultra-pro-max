@@ -72,6 +72,7 @@ describe('review workflow reducer', () => {
       expect(JSON.parse(String(request?.body))).toEqual({
         pr_url: 'https://github.com/owner/repo/pull/42',
         repo_path: null,
+        add_to_benchmark: false,
       })
     } finally {
       store.stopSource()
